@@ -13,4 +13,7 @@ pub struct Cli {
 pub enum Commands {
     /// Generate a new key file
     Keygen(options::keygen::KeygenArgs),
+
+    /// Encrypt all images in a directory using AES-256-GCM
+    Encrypt(options::encrypt::EncryptArgs),
 }
