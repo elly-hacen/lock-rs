@@ -14,6 +14,9 @@ pub enum Commands {
     /// Generate a new key file
     Keygen(options::keygen::KeygenArgs),
 
-    /// Encrypt all images in a directory using AES-256-GCM
+    /// Encrypt all images in a dir using (default: AES-256-GCM)
     Encrypt(options::encrypt::EncryptArgs),
+
+    /// Decrypt all encrypted images in a dir
+    Decrypt(options::decrypt::DecryptArgs),
 }
