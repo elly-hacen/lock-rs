@@ -10,3 +10,15 @@ rand = "0.9.2"
 zeroize = "1.8.2"
 hex = "0.4.3"
 colored = "3.0.0"
+aes-gcm = "0.10.3"
+aead = "0.5.2"
+tempfile = "3.23.0"
+walkdir = "2.5.0"
+
+[lib]
+name = "lock"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lock"
+path = "src/main.rs"
