@@ -12,11 +12,14 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Generate a new key file
+    #[command(visible_alias = "kgen")]
     Keygen(options::keygen::KeygenArgs),
 
     /// Encrypt all images in a dir using (default: AES-256-GCM)
+    #[command(visible_alias = "enc")]
     Encrypt(options::encrypt::EncryptArgs),
 
-    /// Decrypt all encrypted images in a dir
+    /// Decrypt all .lock files in a dir using (default: AES-256-GCM)
+    #[command(visible_alias = "dec")]
     Decrypt(options::decrypt::DecryptArgs),
 }
