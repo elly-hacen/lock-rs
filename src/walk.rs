@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
@@ -10,44 +11,82 @@ pub struct PlanEntry {
     pub dst: PathBuf,
 }
 
-/// Build a plan of (src,dst) for all image files under `input_root`,
-/// mirrored under `output_root`, with `enc_ext` appended to the filename.
-/// e.g. "photo.jpg" -> "photo.jpg.lock"
+/// Used with `WalkDir::filter_entry(...)` to decide whether to keep this entry
+/// and (if it’s a directory) descend into it.
+///
+/// Behavior:
+/// - If `include_hidden == false`, any path whose last component starts with `.` is skipped.
+///   • For directories, returning `false` prunes the entire subtree (perf!).
+///   • For files, it simply skips that one file.
+/// - If `include_hidden == true`, nothing is filtered here.
+///
+/// Notes:
+/// - “Hidden” is defined Unix-style via dot-prefix
+#[inline]
+fn should_descend(e: &DirEntry, include_hidden: bool) -> bool {
+    if include_hidden {
+        true
+    } else {
+        !is_hidden(e.path())
+    }
+}
+
+/// Builds a plan of (source, destination) paths for all image files under `input_root`.
+///
+/// The destination path is mirrored under `output_root`, with the encryption extension
+/// (`enc_ext`) appended to the filename.
+///
+/// # Example
+/// If `enc_ext` is ".lock", "photo.jpg" -> "photo.jpg.lock"
 pub fn build_encrypt_plan(
     input_root: &Path,
     output_root: &Path,
     include_hidden: bool,
     enc_ext: &str,
 ) -> Result<Vec<PlanEntry>> {
+    // Get the absolute, normalized path for the input root.
     let in_root = std::fs::canonicalize(input_root)
         .with_context(|| format!("canonicalizing {}", input_root.display()))?;
-    // If output was just created, canonicalize may fail; fallback to given path
+
+    // Canonicalize the output root; fall back to the provided path if canonicalization fails
+    // (e.g., if the output directory was just created before just code run).
     let out_root = std::fs::canonicalize(output_root).unwrap_or_else(|_| output_root.to_path_buf());
 
     let mut plan = Vec::new();
 
-    for entry in WalkDir::new(&in_root).follow_links(false) {
+    for entry in WalkDir::new(&in_root)
+        .follow_links(false)
+        .same_file_system(true)
+        .into_iter()
+        .filter_entry(|e| should_descend(e, include_hidden))
+    {
         let entry = entry?;
-        if should_skip(&entry, include_hidden) {
+
+        // Skip directories; only process files
+        if entry.file_type().is_dir() {
             continue;
         }
-        let src = entry.path();
 
+        let src = entry.path();
         if !is_image(src) {
             continue;
         }
 
-        // Map to mirrored destination + extension
+        // --- Determine Destination Path (dst) ---
+
+        // Compute the relative path from the input root.
         let rel = src
             .strip_prefix(&in_root)
             .context("computing relative path")?;
         let mut dst = out_root.join(rel);
 
-        // Append enc_ext to filename: "name.ext" -> "name.ext{enc_ext}"
-        let new_name = match dst.file_name() {
-            Some(name) => format!("{}{}", name.to_string_lossy(), enc_ext),
-            None => format!("file{}", enc_ext),
-        };
+        // append `enc_ext` to the filename using OsString (non-UTF-8 safe).
+        let base = dst
+            .file_name()
+            .unwrap_or_else(|| OsStr::new("file")) // Use "file" if no filename exists (e.g., "/")
+            .to_os_string();
+        let mut new_name = base;
+        new_name.push(enc_ext);
         dst.set_file_name(new_name);
 
         plan.push(PlanEntry {
@@ -59,51 +98,67 @@ pub fn build_encrypt_plan(
     Ok(plan)
 }
 
-/// Build a plan of (src,dst) for all encrypted files under `input_root`
-/// (files whose extension matches `enc_ext` like ".lock") mirrored to
-/// `output_root`, with the encrypted suffix removed.
-/// e.g. "photo.jpg.lock" -> "photo.jpg"
+/// Builds a plan of (source, destination) paths for all encrypted files
+/// under `input_root` whose extension matches `enc_ext`.
+///
+/// The destination path is mirrored under `output_root` with the encryption
+/// suffix stripped.
+///
+/// # Example
+/// If `enc_ext` is ".lock", "photo.jpg.lock" -> "photo.jpg"
 pub fn build_decrypt_plan(
     input_root: &Path,
     output_root: &Path,
     include_hidden: bool,
     enc_ext: &str, // e.g. ".lock"
 ) -> Result<Vec<PlanEntry>> {
+    // Get the absolute, normalized path for the input root.
     let in_root = std::fs::canonicalize(input_root)
         .with_context(|| format!("canonicalizing {}", input_root.display()))?;
-    // If output was just created, canonicalize may fail; fallback to given path
+
+    // Canonicalize the output root; fall back to the provided path if canonicalization fails.
     let out_root = std::fs::canonicalize(output_root).unwrap_or_else(|_| output_root.to_path_buf());
 
     let mut plan = Vec::new();
+    // Trim leading dot from extension for comparison
     let ext_no_dot = enc_ext.trim_start_matches('.');
 
-    for entry in WalkDir::new(&in_root).follow_links(false) {
+    for entry in WalkDir::new(&in_root)
+        .follow_links(false)
+        .same_file_system(true)
+        .into_iter()
+        .filter_entry(|e| should_descend(e, include_hidden))
+    {
         let entry = entry?;
-        if should_skip(&entry, include_hidden) {
+
+        // Skip directories.
+        if entry.file_type().is_dir() {
             continue;
         }
+
         let src = entry.path();
 
-        // Only take files with extension == ext_no_dot (e.g., "lock")
+        // Check if the file's last extension matches the encryption extension (case-insensitive).
         let is_enc = src
             .extension()
             .and_then(|e| e.to_str())
             .map(|e| e.eq_ignore_ascii_case(ext_no_dot))
             .unwrap_or(false);
+
         if !is_enc {
             continue;
         }
 
-        // Map to mirrored destination with ".lock" stripped
+        // Compute the relative path from the input root.
         let rel = src
             .strip_prefix(&in_root)
             .context("computing relative path")?;
         let mut dst = out_root.join(rel);
 
-        // For "name.ext.lock" -> use file_stem() which yields "name.ext"
+        // Strip the encryption extension: file_stem() returns the filename without its final extension.
         match src.file_stem() {
             Some(stem) => dst.set_file_name(stem),
-            None => dst.set_file_name(format!("file")),
+            None => dst.set_file_name("file"),
         };
 
         plan.push(PlanEntry {
@@ -113,18 +168,4 @@ pub fn build_decrypt_plan(
     }
 
     Ok(plan)
-}
-
-fn should_skip(entry: &DirEntry, include_hidden: bool) -> bool {
-    let md = match entry.metadata() {
-        Ok(m) => m,
-        Err(_) => return true,
-    };
-    if md.is_dir() {
-        return true;
-    }
-    if !include_hidden && is_hidden(entry.path()) {
-        return true;
-    }
-    false
 }
