@@ -8,20 +8,37 @@ pub fn is_hidden(path: &Path) -> bool {
 }
 
 pub fn is_image(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_lowercase());
+    let ext = match path.extension().and_then(|s| s.to_str()) {
+        Some(e) => e,
+        None => return false,
+    };
 
-    matches!(
-        ext.as_deref(),
-        Some("jpg")
-            | Some("jpeg")
-            | Some("png")
-            | Some("gif")
-            | Some("bmp")
-            | Some("tiff")
-            | Some("webp")
-            | Some("avif")
-    )
+    let eq = |want: &str| ext.eq_ignore_ascii_case(want);
+
+    eq("jpg")
+        || eq("jpeg")
+        || eq("png")
+        || eq("gif")
+        || eq("bmp")
+        || eq("tif")
+        || eq("tiff")
+        || eq("webp")
+        || eq("avif")
+        // iPhone / HEIF
+        || eq("heic")
+        || eq("heif")
+        || eq("heics")
+        || eq("heifs")
+        // RAW formats
+        || eq("dng")
+        || eq("cr2")
+        || eq("cr3")
+        || eq("nef")
+        || eq("arw")
+        || eq("raf")
+        || eq("rw2")
+        || eq("orf")
+        || eq("sr2")
+        || eq("pef")
+        || eq("raw")
 }
