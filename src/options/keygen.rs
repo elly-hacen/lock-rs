@@ -21,4 +21,8 @@ pub struct KeygenArgs {
     /// Overwrite output file if it exists
     #[arg(long, short = 'f')]
     pub force: bool,
+
+    /// Prompt for passphrase to protect the key file (Argon2id + AES-256-GCM)
+    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp")]
+    pub passphrase_prompt: bool,
 }

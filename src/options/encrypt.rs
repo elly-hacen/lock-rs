@@ -22,4 +22,8 @@ pub struct EncryptArgs {
     /// Include hidden files (dotfiles)
     #[arg(long)]
     pub include_hidden: bool,
+
+    /// Prompt for passphrase if the key file is protected
+    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp")]
+    pub passphrase_prompt: bool,
 }
