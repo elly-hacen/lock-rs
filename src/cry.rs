@@ -1,7 +1,15 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 use zeroize::Zeroizing;
 
+use crate::{KEYFILE_HEADER_LEN, KEYFILE_MAGIC, KEYFILE_MAGIC_LEN, SALT_LEN};
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, Payload},
+};
+use argon2::{Algorithm, Argon2, Params, Version};
+
+/// Wrapper for a 32-byte AES-256-GCM key that zeroizes on drop.
 pub struct Aes256GcmKey(pub Zeroizing<[u8; 32]>);
 
 impl std::fmt::Debug for Aes256GcmKey {
@@ -10,29 +18,89 @@ impl std::fmt::Debug for Aes256GcmKey {
     }
 }
 
-pub fn read_lock_key(path: &Path) -> Result<Aes256GcmKey> {
-    let raw = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+/// Read the encryption key from disk.
+///
+/// Supports two formats:
+/// 1) plaintext hex: file contains exactly 64 hex chars (32 bytes).
+/// 2) Passphrase-protected (binary):
+///    LKEY1 | SALT(16) | NONCE(12) | AES-256-GCM(PT=32B key, AAD=header) || TAG(16).
+///
+/// If the file is protected (starts with `LKEY1`) and no `passphrase` is provided,
+/// this returns an error prompting the caller to use `--passphrase-prompt`.
+pub fn read_lock_key(path: &Path, passphrase: Option<&str>) -> Result<Aes256GcmKey> {
+    let raw = fs::read(path).with_context(|| format!("reading {}", path.display()))?;
 
-    // trim common whitespace (\n, \r\n, spaces)
-    let s = raw.trim();
+    // Passphrase-protected keyfile
+    if raw.starts_with(&KEYFILE_MAGIC) {
+        let pass = passphrase.ok_or_else(|| {
+            anyhow!(
+                "'{}' is passphrase-protected; run with --passphrase-prompt (or provide a passphrase)",
+                path.display()
+            )
+        })?;
 
-    // 32 bytes validation before decoding
+        if raw.len() < KEYFILE_HEADER_LEN + 16
+        /* GCM tag */
+        {
+            bail!("{}: keyfile too short", path.display());
+        }
+
+        let salt = &raw[KEYFILE_MAGIC_LEN..KEYFILE_MAGIC_LEN + SALT_LEN];
+        let nonce_bytes = &raw[KEYFILE_MAGIC_LEN + SALT_LEN..KEYFILE_HEADER_LEN];
+        let ct = &raw[KEYFILE_HEADER_LEN..];
+
+        // Derive 32B wrap key via Argon2id (fixed params for v1)
+        let mut wrap = Zeroizing::new([0u8; 32]);
+        // m = 64 MiB, t = 3, p = 1, out_len = 32
+        let params =
+            Params::new(64 * 1024, 3, 1, Some(32)).map_err(|e| anyhow!("argon2 params: {e}"))?;
+        let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+        argon
+            .hash_password_into(pass.as_bytes(), salt, &mut *wrap)
+            .map_err(|e| anyhow!("argon2 derive: {e}"))?;
+
+        // Cipher to unwrap the data key
+        let cipher =
+            Aes256Gcm::new_from_slice(&wrap[..]).map_err(|e| anyhow!("init cipher: {e}"))?;
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        // AAD = full header (MAGIC | SALT | NONCE)
+        let mut aad = Vec::with_capacity(KEYFILE_HEADER_LEN);
+        aad.extend_from_slice(&KEYFILE_MAGIC);
+        aad.extend_from_slice(salt);
+        aad.extend_from_slice(nonce_bytes);
+
+        let pt = cipher
+            .decrypt(nonce, Payload { msg: ct, aad: &aad })
+            .map_err(|_| anyhow!("invalid passphrase or corrupted keyfile"))?;
+
+        if pt.len() != 32 {
+            bail!("decrypted key length was {}, expected 32", pt.len());
+        }
+
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&pt);
+        return Ok(Aes256GcmKey(Zeroizing::new(arr)));
+    }
+
+    // Legacy plaintext hex path
+    let s = std::str::from_utf8(&raw)
+        .with_context(|| format!("{} is not UTF-8; expected hex", path.display()))?
+        .trim();
+
     if s.len() != 64 {
         bail!(
             "invalid key: expected 64 hex chars (32 bytes), found {}",
             s.len()
         );
     }
-
     if !s.chars().all(|c| c.is_ascii_hexdigit()) {
         bail!("invalid key: must contain only 0-9, a-f, A-F");
     }
 
-    // decode into a zerozing buffer
     let decoded = Zeroizing::new(
         hex::decode(s).with_context(|| format!("decoding hex in {}", path.display()))?,
     );
-
     if decoded.len() != 32 {
         bail!(
             "invalid key: decoded length was {}, expected 32",
@@ -40,13 +108,12 @@ pub fn read_lock_key(path: &Path) -> Result<Aes256GcmKey> {
         );
     }
 
-    // Move into fixed-size array protected by Zeroizing
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&decoded);
     Ok(Aes256GcmKey(Zeroizing::new(arr)))
 }
 
-/// Borrow raw bytes (no copies).
+/// Borrow raw key bytes (no copies).
 pub fn key_bytes(key: &Aes256GcmKey) -> &[u8; 32] {
     &key.0
 }

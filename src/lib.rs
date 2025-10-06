@@ -5,4 +5,7 @@ pub mod utils;
 pub mod walk;
 
 pub mod constants;
-pub use constants::{ENCRYPTED_EXT, HEADER_LEN, MAGIC, MAGIC_LEN, NONCE_LEN, TAG_LEN};
+pub use constants::{
+    ENCRYPTED_EXT, HEADER_LEN, KEYFILE_HEADER_LEN, KEYFILE_MAGIC, KEYFILE_MAGIC_LEN, MAGIC,
+    MAGIC_LEN, NONCE_LEN, SALT_LEN, TAG_LEN,
+};
