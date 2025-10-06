@@ -3,7 +3,11 @@ use clap::{Parser, Subcommand};
 use crate::options;
 
 #[derive(Parser)]
-#[command(name = "lock", version, about = "Encrypt/Decrypt images with Rust")]
+#[command(
+    name = "lock",
+    version,
+    about = "Yet another paranoid lock - zerodize your personal pixels before they hit the cloud."
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
