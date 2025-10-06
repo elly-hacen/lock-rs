@@ -5,21 +5,49 @@ use aes_gcm::{
 use anyhow::{Context, Result, anyhow, bail};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
+use zeroize::Zeroizing;
 
 use crate::options::decrypt::DecryptArgs;
 use lock::walk::{PlanEntry, build_decrypt_plan};
-use lock::{ENCRYPTED_EXT, HEADER_LEN, MAGIC, MAGIC_LEN, NONCE_LEN, TAG_LEN};
+use lock::{ENCRYPTED_EXT, HEADER_LEN, KEYFILE_MAGIC, MAGIC, MAGIC_LEN, NONCE_LEN, TAG_LEN};
 use lock::{key_bytes, read_lock_key};
 
-pub fn run(args: DecryptArgs) -> Result<()> {
-    let pass = if args.passphrase_prompt {
-        Some(rpassword::prompt_password("Keyfile passphrase: ")?)
-    } else {
-        None
-    };
+fn is_protected_keyfile(path: &Path) -> bool {
+    match fs::read(path) {
+        Ok(bytes) => bytes.starts_with(&KEYFILE_MAGIC),
+        Err(_) => false,
+    }
+}
 
-    let key = read_lock_key(&args.key_file, pass.as_deref())
+fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<lock::Aes256GcmKey> {
+    if passphrase_prompt || is_protected_keyfile(key_path) {
+        for attempt in 1..=3 {
+            let msg = if attempt == 1 {
+                "Keyfile passphrase: "
+            } else {
+                "Incorrect password. Try again: "
+            };
+            let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
+            match read_lock_key(key_path, Some(pass.as_str())) {
+                Ok(k) => return Ok(k),
+                Err(_) if attempt < 3 => { /* keep looping */ }
+                Err(_) => {
+                    eprintln!("Incorrect password (3 attempts). Exiting.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        unreachable!();
+    } else {
+        read_lock_key(key_path, None)
+    }
+}
+
+pub fn run(args: DecryptArgs) -> Result<()> {
+    // Load key (handles retries/prompting/zeroization)
+    let key = load_key_with_retries(&args.key_file, args.passphrase_prompt)
         .with_context(|| format!("loading key from {}", args.key_file.display()))?;
+
     let raw: &[u8; 32] = key_bytes(&key);
     let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
 
@@ -39,27 +67,32 @@ pub fn run(args: DecryptArgs) -> Result<()> {
 
         let data = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
         if data.len() < HEADER_LEN + TAG_LEN {
-            bail!("{}: file too short", src.display());
+            bail!("{}: file too short to be a valid .lock", src.display());
         }
 
+        // Parse header: MAGIC | NONCE
         let (magic, rest) = data.split_at(MAGIC_LEN);
         if magic != MAGIC {
             bail!("{}: bad magic (not a LOCK1 file)", src.display());
         }
         let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
 
+        // AAD = MAGIC || NONCE
         let mut aad = [0u8; HEADER_LEN];
         aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
         aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
 
+        // Decrypt
         let nonce = Nonce::from_slice(nonce_bytes);
         let pt = cipher
             .decrypt(nonce, Payload { msg: ct, aad: &aad })
             .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
 
+        // Atomic write
         write_atomic_plain(&dst, &pt).with_context(|| format!("writing {}", dst.display()))?;
         println!("ok: {} -> {}", src.display(), dst.display());
     }
+
     Ok(())
 }
 

@@ -6,22 +6,53 @@ use anyhow::{Context, Result, anyhow};
 use rand::{TryRngCore, rngs::OsRng};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
+use zeroize::Zeroizing;
 
 use crate::options::encrypt::EncryptArgs;
 use lock::walk::{PlanEntry, build_encrypt_plan};
-use lock::{ENCRYPTED_EXT, HEADER_LEN, MAGIC, MAGIC_LEN, NONCE_LEN};
+use lock::{ENCRYPTED_EXT, HEADER_LEN, KEYFILE_MAGIC, MAGIC, MAGIC_LEN, NONCE_LEN};
 use lock::{key_bytes, read_lock_key};
 
-pub fn run(args: EncryptArgs) -> Result<()> {
-    // If user asked to prompt, read passphrase (no echo); otherwise None.
-    let pass = if args.passphrase_prompt {
-        Some(rpassword::prompt_password("Keyfile passphrase: ")?)
-    } else {
-        None
-    };
+fn is_protected_keyfile(path: &Path) -> bool {
+    match fs::read(path) {
+        Ok(bytes) => bytes.starts_with(&KEYFILE_MAGIC),
+        Err(_) => false,
+    }
+}
 
-    // Load key (plaintext or protected)
-    let key = read_lock_key(&args.key_file, pass.as_deref())
+/// Load key with interactive retries:
+/// - If `passphrase_prompt` is set OR file is protected (LKEY1), prompt up to 3 times
+/// - On success, return key; on 3 failures, print and exit(1)
+fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<lock::Aes256GcmKey> {
+    if passphrase_prompt || is_protected_keyfile(key_path) {
+        for attempt in 1..=3 {
+            let msg = if attempt == 1 {
+                "Keyfile passphrase: "
+            } else {
+                "Incorrect password. Try again: "
+            };
+            let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
+            match read_lock_key(key_path, Some(pass.as_str())) {
+                Ok(k) => return Ok(k),
+                Err(_) if attempt < 3 => {
+                    // loop to prompt again
+                }
+                Err(_) => {
+                    eprintln!("Incorrect password (3 attempts). Exiting.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        unreachable!();
+    } else {
+        // Plaintext hex key path
+        read_lock_key(key_path, None)
+    }
+}
+
+pub fn run(args: EncryptArgs) -> Result<()> {
+    // Load key (handles retries/prompting/zeroization)
+    let key = load_key_with_retries(&args.key_file, args.passphrase_prompt)
         .with_context(|| format!("loading key from {}", args.key_file.display()))?;
 
     let raw: &[u8; 32] = key_bytes(&key);
@@ -50,18 +81,22 @@ pub fn run(args: EncryptArgs) -> Result<()> {
             }
         }
 
+        // Read plaintext
         let pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
 
+        // Per-file nonce
         let mut nonce_bytes = [0u8; NONCE_LEN];
         OsRng
             .try_fill_bytes(&mut nonce_bytes)
             .context("OsRng failed to generate nonce")?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
+        // AAD = MAGIC || NONCE
         let mut aad_buf = [0u8; HEADER_LEN];
         aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
         aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
 
+        // Encrypt
         let ct = cipher
             .encrypt(
                 nonce,
