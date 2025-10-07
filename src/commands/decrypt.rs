@@ -58,7 +58,12 @@ pub fn run(args: DecryptArgs) -> Result<()> {
         .with_context(|| format!("creating {}", args.output.display()))?;
 
     // 3) Build plan
-    let plan = build_decrypt_plan(&args.input, &args.output, false, ENCRYPTED_EXT)?;
+    let plan = build_decrypt_plan(
+        &args.input,
+        &args.output,
+        args.include_hidden,
+        ENCRYPTED_EXT,
+    )?;
     let total = plan.len();
 
     // 4) UI & parallelism
