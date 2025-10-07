@@ -22,18 +22,16 @@ lock encrypt --in <input_dir> --out <output_dir> [OPTIONS]
 * `--key-file <path>` → use an existing key file
 * `--passphrase` → prompt securely for passphrase (derive key via Argon2id)
 * `--algo <aes|chacha>` → choose algorithm (default: chacha)
-* `--dry-run` → show plan, don’t write files
-* `--concurrency <N>` → number of worker threads
+* `--verbose` → Verbose output: print one line per file and disable progress bar
+* `--jobs <N>` → number of worker threads
 * `--overwrite` → overwrite if output exists (default: error)
 * `--include-hidden` → include hidden files
-* `--preserve-times` → copy mtime/ctime
-* `--max-size <MB>` → skip files larger than this
 
 ---
 
 ### 2. `decrypt`
 
-Decrypts `.flk` files back into original images.
+Decrypts `.lock` files back into original images.
 
 ```
 lock decrypt --in <input_dir> --out <output_dir> [OPTIONS]
@@ -44,8 +42,8 @@ lock decrypt --in <input_dir> --out <output_dir> [OPTIONS]
 * `--key-file <path>` → use an existing key file
 * `--passphrase` → prompt for passphrase
 * `--overwrite-policy <skip|overwrite|rename>` → handle collisions
-* `--concurrency <N>` → threads
-* `--dry-run` → show plan only
+* `--jobs <N>` → threads
+* `--verbose` → Verbose output: print one line per file and disable progress bar
 
 ---
 
@@ -61,6 +59,7 @@ lock keygen --out tlock.key [OPTIONS]
 
 * `--algo <aes|chacha>` → default key type
 * `--force` → overwrite if file exists
+* `--passphrase-prompt` → Prompt for passphrase to protect the key file (Argon2id + AES-256-GCM)
 
 ---
 
@@ -69,7 +68,7 @@ lock keygen --out tlock.key [OPTIONS]
 Check header info of an encrypted file (safe metadata only).
 
 ```
-lock inspect <file.flk>
+lock inspect <file.lock>
 ```
 
 Output: version, algo, ext stored, salt present, nonce.
