@@ -4,6 +4,8 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::ThreadPoolBuilder;
+use rayon::prelude::*;
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
@@ -59,26 +61,77 @@ pub fn run(args: DecryptArgs) -> Result<()> {
     let plan = build_decrypt_plan(&args.input, &args.output, false, ENCRYPTED_EXT)?;
     let total = plan.len();
 
-    // 4) UI: progress bar when NOT verbose; numbered lines when verbose
-    let pb = if args.verbose {
-        None
-    } else {
+    // 4) UI & parallelism
+    if !args.verbose {
+        // progress bar + parallel
         let pb = ProgressBar::new(total as u64);
         pb.set_style(
             ProgressStyle::with_template("[{elapsed_precise}] {bar:40} {pos}/{len}").unwrap(),
         );
-        Some(pb)
-    };
 
-    // 5) Execute
-    for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
-        let n = idx + 1;
+        let threads = args.jobs.unwrap_or_else(|| rayon::current_num_threads());
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .unwrap();
 
-        if dst.exists() {
-            if let Some(pb) = &pb {
-                // in bar mode: don't spam stdout; just tick
-                pb.inc(1);
-            } else if args.verbose {
+        let result = pool.install(|| {
+            plan.par_iter()
+                .try_for_each(|PlanEntry { src, dst }| -> Result<()> {
+                    if dst.exists() {
+                        pb.inc(1);
+                        return Ok(());
+                    }
+
+                    if let Some(parent) = dst.parent() {
+                        fs::create_dir_all(parent)
+                            .with_context(|| format!("creating {}", parent.display()))?;
+                    }
+
+                    let data =
+                        fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                    if data.len() < HEADER_LEN + TAG_LEN {
+                        bail!("{}: file too short to be a valid .lock", src.display());
+                    }
+
+                    // Parse header: MAGIC | NONCE
+                    let (magic, rest) = data.split_at(MAGIC_LEN);
+                    if magic != MAGIC {
+                        bail!("{}: bad magic (not a LOCK1 file)", src.display());
+                    }
+                    let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
+
+                    // AAD = MAGIC || NONCE
+                    let mut aad = [0u8; HEADER_LEN];
+                    aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
+                    aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
+
+                    // Decrypt
+                    let nonce = Nonce::from_slice(nonce_bytes);
+                    let pt = cipher
+                        .decrypt(nonce, Payload { msg: ct, aad: &aad })
+                        .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
+
+                    // Atomic write
+                    write_atomic_plain(&dst, &pt)
+                        .with_context(|| format!("writing {}", dst.display()))?;
+
+                    pb.inc(1);
+                    Ok(())
+                })
+        });
+
+        match result {
+            Ok(()) => pb.finish_with_message("done"),
+            Err(_) => pb.finish_with_message("failed"),
+        }
+        result
+    } else {
+        // verbose: serial with per-file lines
+        for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
+            let n = idx + 1;
+
+            if dst.exists() {
                 println!(
                     "[{}/{}] skip (exists): {} -> {}",
                     n,
@@ -86,43 +139,36 @@ pub fn run(args: DecryptArgs) -> Result<()> {
                     src.display(),
                     dst.display()
                 );
+                continue;
             }
-            continue;
-        }
 
-        if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
 
-        let data = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
-        if data.len() < HEADER_LEN + TAG_LEN {
-            bail!("{}: file too short to be a valid .lock", src.display());
-        }
+            let data = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+            if data.len() < HEADER_LEN + TAG_LEN {
+                bail!("{}: file too short to be a valid .lock", src.display());
+            }
 
-        // Parse header: MAGIC | NONCE
-        let (magic, rest) = data.split_at(MAGIC_LEN);
-        if magic != MAGIC {
-            bail!("{}: bad magic (not a LOCK1 file)", src.display());
-        }
-        let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
+            let (magic, rest) = data.split_at(MAGIC_LEN);
+            if magic != MAGIC {
+                bail!("{}: bad magic (not a LOCK1 file)", src.display());
+            }
+            let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
 
-        // AAD = MAGIC || NONCE
-        let mut aad = [0u8; HEADER_LEN];
-        aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
-        aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
+            let mut aad = [0u8; HEADER_LEN];
+            aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
+            aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
 
-        // Decrypt
-        let nonce = Nonce::from_slice(nonce_bytes);
-        let pt = cipher
-            .decrypt(nonce, Payload { msg: ct, aad: &aad })
-            .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
+            let nonce = Nonce::from_slice(nonce_bytes);
+            let pt = cipher
+                .decrypt(nonce, Payload { msg: ct, aad: &aad })
+                .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
 
-        // Atomic write
-        write_atomic_plain(&dst, &pt).with_context(|| format!("writing {}", dst.display()))?;
+            write_atomic_plain(&dst, &pt).with_context(|| format!("writing {}", dst.display()))?;
 
-        if let Some(pb) = &pb {
-            pb.inc(1);
-        } else if args.verbose {
             println!(
                 "[{}/{}] ok: {} -> {}",
                 n,
@@ -131,12 +177,8 @@ pub fn run(args: DecryptArgs) -> Result<()> {
                 dst.display()
             );
         }
+        Ok(())
     }
-
-    if let Some(pb) = pb {
-        pb.finish_with_message("done");
-    }
-    Ok(())
 }
 
 /// Atomic write for plaintext bytes

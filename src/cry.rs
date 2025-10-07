@@ -70,7 +70,8 @@ pub fn read_lock_key(path: &Path, passphrase: Option<&str>) -> Result<Aes256GcmK
         aad.extend_from_slice(salt);
         aad.extend_from_slice(nonce_bytes);
 
-        let pt = cipher
+        // Decrypt and immediately zeroize the temporary buffer after use
+        let mut pt = cipher
             .decrypt(nonce, Payload { msg: ct, aad: &aad })
             .map_err(|_| anyhow!("invalid passphrase or corrupted keyfile"))?;
 
@@ -80,6 +81,11 @@ pub fn read_lock_key(path: &Path, passphrase: Option<&str>) -> Result<Aes256GcmK
 
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&pt);
+
+        // wipe decrypted key material from the temporary Vec<u8>
+        use zeroize::Zeroize;
+        pt.zeroize();
+
         return Ok(Aes256GcmKey(Zeroizing::new(arr)));
     }
 
