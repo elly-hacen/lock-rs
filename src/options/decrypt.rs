@@ -18,4 +18,12 @@ pub struct DecryptArgs {
     /// Prompt for passphrase if the key file is protected
     #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp")]
     pub passphrase_prompt: bool,
+
+    /// Max parallel workers (default: number of CPUs)
+    #[arg(long = "jobs", short = 'j', value_name = "N")]
+    pub jobs: Option<usize>,
+
+    /// Verbose output: print one line per file and disable progress bar
+    #[arg(long, short = 'v')]
+    pub verbose: bool,
 }

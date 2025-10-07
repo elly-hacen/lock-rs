@@ -3,6 +3,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
 };
 use anyhow::{Context, Result, anyhow, bail};
+use indicatif::{ProgressBar, ProgressStyle};
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
@@ -44,23 +45,51 @@ fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<loc
 }
 
 pub fn run(args: DecryptArgs) -> Result<()> {
-    // Load key (handles retries/prompting/zeroization)
+    // 1) Load key (handles retries/prompting/zeroization)
     let key = load_key_with_retries(&args.key_file, args.passphrase_prompt)
         .with_context(|| format!("loading key from {}", args.key_file.display()))?;
-
     let raw: &[u8; 32] = key_bytes(&key);
     let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
 
+    // 2) Ensure output dir
     fs::create_dir_all(&args.output)
         .with_context(|| format!("creating {}", args.output.display()))?;
 
+    // 3) Build plan
     let plan = build_decrypt_plan(&args.input, &args.output, false, ENCRYPTED_EXT)?;
+    let total = plan.len();
 
-    for PlanEntry { src, dst } in plan {
+    // 4) UI: progress bar when NOT verbose; numbered lines when verbose
+    let pb = if args.verbose {
+        None
+    } else {
+        let pb = ProgressBar::new(total as u64);
+        pb.set_style(
+            ProgressStyle::with_template("[{elapsed_precise}] {bar:40} {pos}/{len}").unwrap(),
+        );
+        Some(pb)
+    };
+
+    // 5) Execute
+    for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
+        let n = idx + 1;
+
         if dst.exists() {
-            eprintln!("skip (exists): {}", dst.display());
+            if let Some(pb) = &pb {
+                // in bar mode: don't spam stdout; just tick
+                pb.inc(1);
+            } else if args.verbose {
+                println!(
+                    "[{}/{}] skip (exists): {} -> {}",
+                    n,
+                    total,
+                    src.display(),
+                    dst.display()
+                );
+            }
             continue;
         }
+
         if let Some(parent) = dst.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
@@ -90,9 +119,23 @@ pub fn run(args: DecryptArgs) -> Result<()> {
 
         // Atomic write
         write_atomic_plain(&dst, &pt).with_context(|| format!("writing {}", dst.display()))?;
-        println!("ok: {} -> {}", src.display(), dst.display());
+
+        if let Some(pb) = &pb {
+            pb.inc(1);
+        } else if args.verbose {
+            println!(
+                "[{}/{}] ok: {} -> {}",
+                n,
+                total,
+                src.display(),
+                dst.display()
+            );
+        }
     }
 
+    if let Some(pb) = pb {
+        pb.finish_with_message("done");
+    }
     Ok(())
 }
 
