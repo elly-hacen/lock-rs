@@ -3,7 +3,9 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
 };
 use anyhow::{Context, Result, anyhow};
+use indicatif::{ProgressBar, ProgressStyle};
 use rand::{TryRngCore, rngs::OsRng};
+use rayon::prelude::*;
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
@@ -34,9 +36,7 @@ fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<loc
             let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
             match read_lock_key(key_path, Some(pass.as_str())) {
                 Ok(k) => return Ok(k),
-                Err(_) if attempt < 3 => {
-                    // loop to prompt again
-                }
+                Err(_) if attempt < 3 => {}
                 Err(_) => {
                     eprintln!("Incorrect password (3 attempts). Exiting.");
                     std::process::exit(1);
@@ -54,9 +54,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
     // Load key (handles retries/prompting/zeroization)
     let key = load_key_with_retries(&args.key_file, args.passphrase_prompt)
         .with_context(|| format!("loading key from {}", args.key_file.display()))?;
-
     let raw: &[u8; 32] = key_bytes(&key);
-    let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
 
     fs::create_dir_all(&args.output)
         .with_context(|| format!("creating {}", args.output.display()))?;
@@ -67,52 +65,132 @@ pub fn run(args: EncryptArgs) -> Result<()> {
         args.include_hidden,
         ENCRYPTED_EXT,
     )?;
+    let total = plan.len();
+    let overwrite = args.overwrite;
 
-    for PlanEntry { src, dst } in plan {
-        if let Some(parent) = dst.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
-        }
-        if dst.exists() {
-            if args.overwrite {
-                let _ = fs::remove_file(&dst);
-            } else {
-                eprintln!("skip (exists): {}", dst.display());
-                continue;
+    // UI mode: progress bar (default) vs verbose prints
+    if !args.verbose {
+        // ---- progress bar mode (parallel) ----
+        let pb = ProgressBar::new(total as u64);
+        pb.set_style(
+            ProgressStyle::with_template("[{elapsed_precise}] {bar:40} {pos}/{len}").unwrap(),
+        );
+
+        let result = plan
+            .par_iter()
+            .try_for_each(|PlanEntry { src, dst }| -> Result<()> {
+                if let Some(parent) = dst.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                if dst.exists() {
+                    if overwrite {
+                        let _ = fs::remove_file(&dst);
+                    } else {
+                        // no printing in bar mode (keep output clean)
+                        pb.inc(1);
+                        return Ok(());
+                    }
+                }
+
+                // Read plaintext
+                let pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+
+                // Per-file nonce
+                let mut nonce_bytes = [0u8; NONCE_LEN];
+                OsRng
+                    .try_fill_bytes(&mut nonce_bytes)
+                    .context("OsRng failed to generate nonce")?;
+                let nonce = Nonce::from_slice(&nonce_bytes);
+
+                // AAD = MAGIC || NONCE
+                let mut aad_buf = [0u8; HEADER_LEN];
+                aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
+                aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
+
+                // Local cipher per task
+                let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
+
+                // Encrypt
+                let ct = cipher
+                    .encrypt(
+                        nonce,
+                        Payload {
+                            msg: pt.as_ref(),
+                            aad: &aad_buf,
+                        },
+                    )
+                    .map_err(|_| anyhow!("encrypting {}", src.display()))?;
+
+                write_atomic(dst, &MAGIC, &nonce_bytes, &ct)
+                    .with_context(|| format!("writing {}", dst.display()))?;
+
+                pb.inc(1);
+                Ok(())
+            });
+
+        pb.finish_with_message("done");
+        result
+    } else {
+        // ---- verbose mode (serial) ----
+        for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
+            let n = idx + 1;
+
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
             }
+            if dst.exists() {
+                if overwrite {
+                    let _ = fs::remove_file(&dst);
+                } else {
+                    println!(
+                        "[{}/{}] skip (exists): {} -> {}",
+                        n,
+                        total,
+                        src.display(),
+                        dst.display()
+                    );
+                    continue;
+                }
+            }
+
+            let pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+
+            let mut nonce_bytes = [0u8; NONCE_LEN];
+            OsRng
+                .try_fill_bytes(&mut nonce_bytes)
+                .context("OsRng failed to generate nonce")?;
+            let nonce = Nonce::from_slice(&nonce_bytes);
+
+            let mut aad_buf = [0u8; HEADER_LEN];
+            aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
+            aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
+
+            let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
+            let ct = cipher
+                .encrypt(
+                    nonce,
+                    Payload {
+                        msg: pt.as_ref(),
+                        aad: &aad_buf,
+                    },
+                )
+                .map_err(|_| anyhow!("encrypting {}", src.display()))?;
+
+            write_atomic(&dst, &MAGIC, &nonce_bytes, &ct)
+                .with_context(|| format!("writing {}", dst.display()))?;
+
+            println!(
+                "[{}/{}] ok: {} -> {}",
+                n,
+                total,
+                src.display(),
+                dst.display()
+            );
         }
-
-        // Read plaintext
-        let pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
-
-        // Per-file nonce
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        OsRng
-            .try_fill_bytes(&mut nonce_bytes)
-            .context("OsRng failed to generate nonce")?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // AAD = MAGIC || NONCE
-        let mut aad_buf = [0u8; HEADER_LEN];
-        aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
-        aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
-
-        // Encrypt
-        let ct = cipher
-            .encrypt(
-                nonce,
-                Payload {
-                    msg: pt.as_ref(),
-                    aad: &aad_buf,
-                },
-            )
-            .map_err(|_| anyhow!("encrypting {}", src.display()))?;
-
-        write_atomic(&dst, &MAGIC, &nonce_bytes, &ct)
-            .with_context(|| format!("writing {}", dst.display()))?;
-
-        println!("ok: {} -> {}", src.display(), dst.display());
+        Ok(())
     }
-    Ok(())
 }
 
 /// Write MAGIC | NONCE | CIPHERTEXT atomically
