@@ -1,9 +1,20 @@
+#[cfg(unix)]
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 pub fn is_hidden(path: &Path) -> bool {
-    match path.file_name().and_then(|n| n.to_str()) {
-        Some(name) if name.starts_with('.') => true,
-        _ => false,
+    match path.file_name() {
+        Some(name) => {
+            #[cfg(unix)]
+            {
+                name.as_bytes().first().map_or(false, |b| *b == b'.')
+            }
+            #[cfg(not(unix))]
+            {
+                name.to_string_lossy().start_with(".")
+            }
+        }
+        None => false,
     }
 }
 
