@@ -1,6 +1,6 @@
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit, Payload},
+    aead::{Aead, Key, KeyInit, Payload},
 };
 use anyhow::{Context, Result, anyhow};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -83,58 +83,67 @@ pub fn run(args: EncryptArgs) -> Result<()> {
             ProgressStyle::with_template("[{elapsed_precise}] {bar:40} {pos}/{len}").unwrap(),
         );
 
+        // Each thread builds one cipher (perf)
         let result = pool.install(|| {
             plan.par_iter()
-                .try_for_each(|PlanEntry { src, dst }| -> Result<()> {
-                    if let Some(parent) = dst.parent() {
-                        fs::create_dir_all(parent)
-                            .with_context(|| format!("creating {}", parent.display()))?;
-                    }
-                    if dst.exists() {
-                        if overwrite {
-                            let _ = fs::remove_file(&dst);
-                        } else {
-                            pb.inc(1);
-                            return Ok(());
+                .map_init(
+                    || Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(raw)),
+                    |cipher, PlanEntry { src, dst }| -> Result<()> {
+                        if let Some(parent) = dst.parent() {
+                            fs::create_dir_all(parent)
+                                .with_context(|| format!("creating {}", parent.display()))?;
                         }
-                    }
+                        if dst.exists() {
+                            if overwrite {
+                                let _ = fs::remove_file(&dst);
+                            } else {
+                                pb.inc(1);
+                                return Ok(());
+                            }
+                        }
 
-                    // Read plaintext
-                    let pt =
-                        fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                        // Read plaintext file
+                        let mut pt =
+                            fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
 
-                    // Per-file nonce
-                    let mut nonce_bytes = [0u8; NONCE_LEN];
-                    OsRng
-                        .try_fill_bytes(&mut nonce_bytes)
-                        .context("OsRng failed to generate nonce")?;
-                    let nonce = Nonce::from_slice(&nonce_bytes);
+                        // Per-file random nonce
+                        let mut nonce_bytes = [0u8; NONCE_LEN];
+                        OsRng
+                            .try_fill_bytes(&mut nonce_bytes)
+                            .context("OsRng failed to generate nonce")?;
+                        let nonce = Nonce::from_slice(&nonce_bytes);
 
-                    // AAD = MAGIC || NONCE
-                    let mut aad_buf = [0u8; HEADER_LEN];
-                    aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
-                    aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
+                        // AAD = MAGIC || NONCE
+                        let mut aad_buf = [0u8; HEADER_LEN];
+                        aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
+                        aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
 
-                    // Local cipher per task
-                    let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
+                        // Encrypt file
+                        let ct = cipher
+                            .encrypt(
+                                nonce,
+                                Payload {
+                                    msg: pt.as_ref(),
+                                    aad: &aad_buf,
+                                },
+                            )
+                            .map_err(|_| anyhow!("encrypting {}", src.display()))?;
 
-                    // Encrypt
-                    let ct = cipher
-                        .encrypt(
-                            nonce,
-                            Payload {
-                                msg: pt.as_ref(),
-                                aad: &aad_buf,
-                            },
-                        )
-                        .map_err(|_| anyhow!("encrypting {}", src.display()))?;
+                        // Zeroize plaintext buffer after use
+                        {
+                            use zeroize::Zeroize;
+                            pt.zeroize();
+                        }
 
-                    write_atomic(dst, &MAGIC, &nonce_bytes, &ct)
-                        .with_context(|| format!("writing {}", dst.display()))?;
+                        write_atomic(dst, &MAGIC, &nonce_bytes, &ct)
+                            .with_context(|| format!("writing {}", dst.display()))?;
 
-                    pb.inc(1);
-                    Ok(())
-                })
+                        pb.inc(1);
+                        Ok(())
+                    },
+                )
+                .collect::<Result<Vec<_>>>()
+                .map(|_| ())
         });
 
         match result {
@@ -143,7 +152,8 @@ pub fn run(args: EncryptArgs) -> Result<()> {
         }
         result
     } else {
-        // ---- verbose mode (serial) ----
+        // ---- verbose mode ----
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(raw));
         for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
             let n = idx + 1;
 
@@ -166,7 +176,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
                 }
             }
 
-            let pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+            let mut pt = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
 
             let mut nonce_bytes = [0u8; NONCE_LEN];
             OsRng
@@ -178,7 +188,6 @@ pub fn run(args: EncryptArgs) -> Result<()> {
             aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
             aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
 
-            let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
             let ct = cipher
                 .encrypt(
                     nonce,
@@ -188,6 +197,12 @@ pub fn run(args: EncryptArgs) -> Result<()> {
                     },
                 )
                 .map_err(|_| anyhow!("encrypting {}", src.display()))?;
+
+            // Zeroize plaintext buffer after use
+            {
+                use zeroize::Zeroize;
+                pt.zeroize();
+            }
 
             write_atomic(&dst, &MAGIC, &nonce_bytes, &ct)
                 .with_context(|| format!("writing {}", dst.display()))?;
@@ -216,10 +231,8 @@ fn write_atomic(dst: &Path, magic: &[u8; 5], nonce12: &[u8; 12], ct: &[u8]) -> R
     tmp.write_all(ct)?;
     tmp.flush()?;
 
-    #[cfg(unix)]
-    {
-        let _ = tmp.as_file().sync_all();
-    }
+    // data hits disk on all platforms
+    let _ = tmp.as_file().sync_all();
 
     // Atomic rename into place
     tmp.persist(dst).map(|_| ()).map_err(|e| e.error.into())

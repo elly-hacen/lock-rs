@@ -1,6 +1,6 @@
 use aes_gcm::{
     Aes256Gcm, Nonce,
-    aead::{Aead, KeyInit, Payload},
+    aead::{Aead, Key, KeyInit, Payload},
 };
 use anyhow::{Context, Result, anyhow, bail};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -33,7 +33,7 @@ fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<loc
             let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
             match read_lock_key(key_path, Some(pass.as_str())) {
                 Ok(k) => return Ok(k),
-                Err(_) if attempt < 3 => { /* keep looping */ }
+                Err(_) if attempt < 3 => {}
                 Err(_) => {
                     eprintln!("Incorrect password (3 attempts). Exiting.");
                     std::process::exit(1);
@@ -51,7 +51,6 @@ pub fn run(args: DecryptArgs) -> Result<()> {
     let key = load_key_with_retries(&args.key_file, args.passphrase_prompt)
         .with_context(|| format!("loading key from {}", args.key_file.display()))?;
     let raw: &[u8; 32] = key_bytes(&key);
-    let cipher = Aes256Gcm::new(aes_gcm::Key::<Aes256Gcm>::from_slice(raw));
 
     // 2) Ensure output dir
     fs::create_dir_all(&args.output)
@@ -82,48 +81,59 @@ pub fn run(args: DecryptArgs) -> Result<()> {
 
         let result = pool.install(|| {
             plan.par_iter()
-                .try_for_each(|PlanEntry { src, dst }| -> Result<()> {
-                    if dst.exists() {
+                .map_init(
+                    || Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(raw)),
+                    |cipher, PlanEntry { src, dst }| -> Result<()> {
+                        if dst.exists() {
+                            pb.inc(1);
+                            return Ok(());
+                        }
+
+                        if let Some(parent) = dst.parent() {
+                            fs::create_dir_all(parent)
+                                .with_context(|| format!("creating {}", parent.display()))?;
+                        }
+
+                        let data =
+                            fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                        if data.len() < HEADER_LEN + TAG_LEN {
+                            bail!("{}: file too short to be a valid .lock", src.display());
+                        }
+
+                        // Parse header: MAGIC | NONCE
+                        let (magic, rest) = data.split_at(MAGIC_LEN);
+                        if magic != MAGIC {
+                            bail!("{}: bad magic (not a LOCK1 file)", src.display());
+                        }
+                        let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
+
+                        // AAD = MAGIC || NONCE
+                        let mut aad = [0u8; HEADER_LEN];
+                        aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
+                        aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
+
+                        // Decrypt
+                        let nonce = Nonce::from_slice(nonce_bytes);
+                        let mut pt = cipher
+                            .decrypt(nonce, Payload { msg: ct, aad: &aad })
+                            .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
+
+                        // Atomic write
+                        write_atomic_plain(&dst, &pt)
+                            .with_context(|| format!("writing {}", dst.display()))?;
+
+                        // Zeroize plaintext from memory after writing
+                        {
+                            use zeroize::Zeroize;
+                            pt.zeroize();
+                        }
+
                         pb.inc(1);
-                        return Ok(());
-                    }
-
-                    if let Some(parent) = dst.parent() {
-                        fs::create_dir_all(parent)
-                            .with_context(|| format!("creating {}", parent.display()))?;
-                    }
-
-                    let data =
-                        fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
-                    if data.len() < HEADER_LEN + TAG_LEN {
-                        bail!("{}: file too short to be a valid .lock", src.display());
-                    }
-
-                    // Parse header: MAGIC | NONCE
-                    let (magic, rest) = data.split_at(MAGIC_LEN);
-                    if magic != MAGIC {
-                        bail!("{}: bad magic (not a LOCK1 file)", src.display());
-                    }
-                    let (nonce_bytes, ct) = rest.split_at(NONCE_LEN);
-
-                    // AAD = MAGIC || NONCE
-                    let mut aad = [0u8; HEADER_LEN];
-                    aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
-                    aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
-
-                    // Decrypt
-                    let nonce = Nonce::from_slice(nonce_bytes);
-                    let pt = cipher
-                        .decrypt(nonce, Payload { msg: ct, aad: &aad })
-                        .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
-
-                    // Atomic write
-                    write_atomic_plain(&dst, &pt)
-                        .with_context(|| format!("writing {}", dst.display()))?;
-
-                    pb.inc(1);
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
+                .collect::<Result<Vec<_>>>()
+                .map(|_| ())
         });
 
         match result {
@@ -133,6 +143,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
         result
     } else {
         // verbose: serial with per-file lines
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(raw));
         for (idx, PlanEntry { src, dst }) in plan.into_iter().enumerate() {
             let n = idx + 1;
 
@@ -168,11 +179,17 @@ pub fn run(args: DecryptArgs) -> Result<()> {
             aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
 
             let nonce = Nonce::from_slice(nonce_bytes);
-            let pt = cipher
+            let mut pt = cipher
                 .decrypt(nonce, Payload { msg: ct, aad: &aad })
                 .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
 
             write_atomic_plain(&dst, &pt).with_context(|| format!("writing {}", dst.display()))?;
+
+            // Zeroize plaintext buffer
+            {
+                use zeroize::Zeroize;
+                pt.zeroize();
+            }
 
             println!(
                 "[{}/{}] ok: {} -> {}",
@@ -196,10 +213,9 @@ fn write_atomic_plain(dst: &Path, pt: &[u8]) -> Result<()> {
     tmp.write_all(pt)?;
     tmp.flush()?;
 
-    #[cfg(unix)]
-    {
-        let _ = tmp.as_file().sync_all();
-    }
+    // data hits disk on all platforms
+    let _ = tmp.as_file().sync_all();
 
+    // atomic renaming
     tmp.persist(dst).map(|_| ()).map_err(|e| e.error.into())
 }
