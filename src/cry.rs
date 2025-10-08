@@ -65,10 +65,10 @@ pub fn read_lock_key(path: &Path, passphrase: Option<&str>) -> Result<Aes256GcmK
         let nonce = Nonce::from_slice(nonce_bytes);
 
         // AAD = full header (MAGIC | SALT | NONCE)
-        let mut aad = Vec::with_capacity(KEYFILE_HEADER_LEN);
-        aad.extend_from_slice(&KEYFILE_MAGIC);
-        aad.extend_from_slice(salt);
-        aad.extend_from_slice(nonce_bytes);
+        let mut aad = [0u8; KEYFILE_HEADER_LEN];
+        aad[..KEYFILE_MAGIC_LEN].copy_from_slice(&KEYFILE_MAGIC);
+        aad[KEYFILE_MAGIC_LEN..KEYFILE_MAGIC_LEN + SALT_LEN].copy_from_slice(salt);
+        aad[KEYFILE_MAGIC_LEN + SALT_LEN..].copy_from_slice(nonce_bytes);
 
         // Decrypt and immediately zeroize the temporary buffer after use
         let mut pt = cipher
