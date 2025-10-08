@@ -157,8 +157,8 @@ pub fn build_decrypt_plan(
 
         // Strip the encryption extension: file_stem() returns the filename without its final extension.
         match src.file_stem() {
-            Some(stem) => dst.set_file_name(stem),
-            None => dst.set_file_name("file"),
+            Some(stem) if !stem.is_empty() => dst.set_file_name(stem),
+            _ => dst.set_file_name("file"),
         };
 
         plan.push(PlanEntry {
