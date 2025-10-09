@@ -26,4 +26,8 @@ pub enum Commands {
     /// Decrypt all .lock files in a dir using (default: AES-256-GCM)
     #[command(visible_alias = "dec")]
     Decrypt(options::decrypt::DecryptArgs),
+
+    /// File to inspect (.lock or .key)
+    #[command(visible_alias = "insp")]
+    Inspect(options::inspect::InspectArgs),
 }

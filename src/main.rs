@@ -11,5 +11,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Keygen(args) => commands::keygen::run(args),
         Commands::Encrypt(args) => commands::encrypt::run(args),
         Commands::Decrypt(args) => commands::decrypt::run(args),
+        Commands::Inspect(args) => commands::inspect::run(args),
     }
 }
