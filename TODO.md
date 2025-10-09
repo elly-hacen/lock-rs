@@ -1,17 +1,14 @@
-
-# Lock CLI Structure
-
-## Base command
+## **Base Command**
 
 ```
 lock <COMMAND> [OPTIONS]
 ```
 
-## Commands
+## **Commands**
 
-### 1. `encrypt`
+### **1. `encrypt`**
 
-Encrypts all images in a directory.
+Encrypt all image files in a directory using AES-256-GCM (default).
 
 ```
 lock encrypt --in <input_dir> --out <output_dir> [OPTIONS]
@@ -19,19 +16,20 @@ lock encrypt --in <input_dir> --out <output_dir> [OPTIONS]
 
 **Options**
 
-* `--key-file <path>` → use an existing key file
-* `--passphrase` → prompt securely for passphrase (derive key via Argon2id)
-* `--algo <aes|chacha>` → choose algorithm (default: chacha)
-* `--verbose` → Verbose output: print one line per file and disable progress bar
-* `--jobs <N>` → number of worker threads
-* `--overwrite` → overwrite if output exists (default: error)
-* `--include-hidden` → include hidden files
+| Option                    | Description                                              |
+| ------------------------- | -------------------------------------------------------- |
+| `--key-file <path>`       | Use an existing key file (plain or passphrase-protected) |
+| `--passphrase-prompt, -p` | Prompt securely for passphrase (Argon2id key derivation) |
+| `--overwrite`             | Overwrite existing `.lock` files (default: skip)         |
+| `--include-hidden`        | Include hidden files and directories                     |
+| `--jobs, -j <N>`          | Number of parallel worker threads (default: CPU count)   |
+| `--verbose, -v`           | Verbose output (disable progress bar, log per file)      |
 
 ---
 
-### 2. `decrypt`
+### **2. `decrypt`**
 
-Decrypts `.lock` files back into original images.
+Decrypt `.lock` files back to their original form.
 
 ```
 lock decrypt --in <input_dir> --out <output_dir> [OPTIONS]
@@ -39,88 +37,90 @@ lock decrypt --in <input_dir> --out <output_dir> [OPTIONS]
 
 **Options**
 
-* `--key-file <path>` → use an existing key file
-* `--passphrase` → prompt for passphrase
-* `--overwrite-policy <skip|overwrite|rename>` → handle collisions
-* `--jobs <N>` → threads
-* `--verbose` → Verbose output: print one line per file and disable progress bar
+| Option                    | Description                                              |
+| ------------------------- | -------------------------------------------------------- |
+| `--key-file <path>`       | Use an existing key file (plain or passphrase-protected) |
+| `--passphrase-prompt, -p` | Prompt for passphrase                                    |
+| `--include-hidden`        | Include hidden files                                     |
+| `--jobs, -j <N>`          | Number of parallel worker threads (default: CPU count)   |
+| `--verbose, -v`           | Verbose output (disable progress bar, log per file)      |
 
 ---
 
-### 3. `keygen`
+### **3. `keygen`**
 
-Generate a new key file.
+Generate a new encryption key file.
 
 ```
-lock keygen --out tlock.key [OPTIONS]
+lock keygen --out <key_file> [OPTIONS]
 ```
 
 **Options**
 
-* `--algo <aes|chacha>` → default key type
-* `--force` → overwrite if file exists
-* `--passphrase-prompt` → Prompt for passphrase to protect the key file (Argon2id + AES-256-GCM)
+| Option                    | Description                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| `--algo <aes>`            | Key algorithm (default: AES-256-GCM)                              |
+| `--force, -f`             | Overwrite existing key file                                       |
+| `--passphrase-prompt, -p` | Prompt for passphrase to protect the key (Argon2id + AES-256-GCM) |
 
 ---
 
-### 4. `inspect`
+### **4. `inspect`**
 
-Check header info of an encrypted file (safe metadata only).
+Display header information from a `.lock` encrypted file or key file (`.key`) without decrypting.
+This reveals **safe metadata only** — version, algorithm, salt, and nonce.
 
 ```
-lock inspect <file.lock>
+lock inspect <file> [--json]
 ```
 
-Output: version, algo, ext stored, salt present, nonce.
+**Options**
 
----
+| Option   | Description                    |
+| -------- | ------------------------------ |
+| `--json` | Output metadata in JSON format |
 
-### 5. `version` / `help`
+**Examples**
 
-* `lock --version`
-* `lock help [command]`
+Human-readable:
 
----
+```
+lock inspect vault/photo.jpg.lock
+```
 
-# Example Usage
+JSON output:
 
-```bash
-# Encrypt a folder with a generated key
-lock keygen --out lock.key
-lock encrypt --in ~/Pictures --out ~/Encrypted --key-file lock.key
-
-# Encrypt with passphrase (will prompt)
-lock encrypt --in ./images --out ./enc --passphrase
-
-# Decrypt back
-lock decrypt --in ./enc --out ./restored --key-file lock.key
-
-# Inspect one encrypted file
-lock inspect ./enc/photo.jpg.flk
+```
+lock inspect lock.key --json
 ```
 
 ---
 
-**Design Philosophy**
+### **5. `version` / `help`**
 
-* One key command = one job.
-* No hidden magic: everything explicit (`--in`, `--out`, `--key-file`).
-* Safe defaults: refuse overwrite unless told.
-* `inspect` helps debugging without decryption.
+Show program version or help.
+
+```
+lock --version
+lock help [command]
+```
+
+
+## **Project Layout**
 
 ```
 lock/
  ├─ Cargo.toml
  └─ src/
-     ├─ main.rs            # entrypoint
-     ├─ cli.rs             # top-level CLI wiring
+     ├─ main.rs              # Entry point
+     ├─ cli.rs               # Top-level CLI parser and command dispatch
      │
      ├─ commands/
      │   ├─ mod.rs
-     │   ├─ encrypt.rs
-     │   ├─ decrypt.rs
-     │   ├─ keygen.rs
-     │   └─ inspect.rs
+     │   ├─ encrypt.rs       # AES-256-GCM encryption logic
+     │   ├─ decrypt.rs       # AES-256-GCM decryption logic
+     │   ├─ keygen.rs        # Key generation (plain / passphrase-protected)
+     │   └─ inspect.rs       # Header inspection (safe metadata)
      │
      ├─ options/
      │   ├─ mod.rs
@@ -129,8 +129,8 @@ lock/
      │   ├─ keygen.rs
      │   └─ inspect.rs
      │
-     ├─ crypto.rs          # AEAD, KDF, header
-     ├─ fs_utils.rs        # file walker, atomic writes
-     ├─ progress.rs        # progress + events
-     ├─ errors.rs          # error enum
+     ├─ cry.rs               # Key loading, Argon2id KDF, AES-GCM primitives
+     ├─ walk.rs              # File discovery and planning utilities
+     ├─ utils.rs             # Helpers for hidden files, image detection, etc.
+     ├─ constants.rs         # Magic constants and header format
 ```
