@@ -204,7 +204,8 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
 
     // owner type must be "User" (not "Organization")
     if let Some(own) = &repo_meta.owner
-        && own.r#type != "User" {
+        && own.r#type != "User"
+    {
         bail!(
             "upload blocked: {}/{} belongs to an organization. Only personal user repos are allowed.",
             owner,
