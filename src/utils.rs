@@ -24,7 +24,6 @@ pub fn is_image(path: &Path) -> bool {
         None => return false,
     };
 
-    // Use a HashSet for O(1) lookup instead of multiple string comparisons
     const IMAGE_EXTENSIONS: &[&str] = &[
         "jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "webp", "avif",
         "heic", "heif", "heics", "heifs",  // iPhone / HEIF
