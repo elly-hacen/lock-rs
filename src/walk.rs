@@ -12,7 +12,7 @@ pub struct PlanEntry {
 }
 
 /// Used with `WalkDir::filter_entry(...)` to decide whether to keep this entry
-/// and (if it’s a directory) descend into it.
+/// and (if it's a directory) descend into it.
 ///
 /// Behavior:
 /// - If `include_hidden == false`, any path whose last component starts with `.` is skipped.
@@ -21,7 +21,7 @@ pub struct PlanEntry {
 /// - If `include_hidden == true`, nothing is filtered here.
 ///
 /// Notes:
-/// - “Hidden” is defined Unix-style via dot-prefix
+/// - "Hidden" is defined Unix-style via dot-prefix
 #[inline]
 fn should_descend(e: &DirEntry, include_hidden: bool) -> bool {
     if include_hidden {
@@ -48,9 +48,13 @@ pub fn build_encrypt_plan(
     let in_root = std::fs::canonicalize(input_root)
         .with_context(|| format!("canonicalizing {}", input_root.display()))?;
 
-    // Canonicalize the output root; fall back to the provided path if canonicalization fails
-    // (e.g., if the output directory was just created before just code run).
-    let out_root = std::fs::canonicalize(output_root).unwrap_or_else(|_| output_root.to_path_buf());
+    // Ensure output directory exists before canonicalizing
+    std::fs::create_dir_all(output_root)
+        .with_context(|| format!("creating output directory {}", output_root.display()))?;
+
+    // Canonicalize the output root
+    let out_root = std::fs::canonicalize(output_root)
+        .with_context(|| format!("canonicalizing {}", output_root.display()))?;
 
     let mut plan = Vec::new();
 
@@ -77,7 +81,7 @@ pub fn build_encrypt_plan(
         // Compute the relative path from the input root.
         let rel = src
             .strip_prefix(&in_root)
-            .context("computing relative path")?;
+            .with_context(|| format!("computing relative path for {}", src.display()))?;
         let mut dst = out_root.join(rel);
 
         // append `enc_ext` to the filename using OsString (non-UTF-8 safe).
@@ -116,8 +120,13 @@ pub fn build_decrypt_plan(
     let in_root = std::fs::canonicalize(input_root)
         .with_context(|| format!("canonicalizing {}", input_root.display()))?;
 
-    // Canonicalize the output root; fall back to the provided path if canonicalization fails.
-    let out_root = std::fs::canonicalize(output_root).unwrap_or_else(|_| output_root.to_path_buf());
+    // Ensure output directory exists before canonicalizing
+    std::fs::create_dir_all(output_root)
+        .with_context(|| format!("creating output directory {}", output_root.display()))?;
+
+    // Canonicalize the output root
+    let out_root = std::fs::canonicalize(output_root)
+        .with_context(|| format!("canonicalizing {}", output_root.display()))?;
 
     let mut plan = Vec::new();
     // Trim leading dot from extension for comparison
@@ -152,7 +161,7 @@ pub fn build_decrypt_plan(
         // Compute the relative path from the input root.
         let rel = src
             .strip_prefix(&in_root)
-            .context("computing relative path")?;
+            .with_context(|| format!("computing relative path for {}", src.display()))?;
         let mut dst = out_root.join(rel);
 
         // Strip the encryption extension: file_stem() returns the filename without its final extension.
