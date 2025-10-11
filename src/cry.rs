@@ -123,3 +123,38 @@ pub fn read_lock_key(path: &Path, passphrase: Option<&str>) -> Result<Aes256GcmK
 pub fn key_bytes(key: &Aes256GcmKey) -> &[u8; 32] {
     &key.0
 }
+
+/// Load key with interactive retries
+///
+/// - If `passphrase_prompt` is set OR file is protected (LKEY1), prompt up to 3 times
+/// - On success, return key; on 3 failures, print and exit(1)
+pub fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<Aes256GcmKey> {
+    // Check if keyfile is protected by reading first few bytes
+    let is_protected = fs::read(key_path)
+        .ok()
+        .map(|bytes| bytes.starts_with(&KEYFILE_MAGIC))
+        .unwrap_or(false);
+
+    if passphrase_prompt || is_protected {
+        for attempt in 1..=3 {
+            let msg = if attempt == 1 {
+                "Keyfile passphrase: "
+            } else {
+                "Incorrect password. Try again: "
+            };
+            let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
+            match read_lock_key(key_path, Some(pass.as_str())) {
+                Ok(k) => return Ok(k),
+                Err(_) if attempt < 3 => {}
+                Err(_) => {
+                    eprintln!("Incorrect password (3 attempts). Exiting.");
+                    std::process::exit(1);
+                }
+            }
+        }
+        unreachable!();
+    } else {
+        // Plaintext hex key path
+        read_lock_key(key_path, None)
+    }
+}
