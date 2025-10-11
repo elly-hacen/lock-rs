@@ -55,7 +55,7 @@ pub fn run(args: InspectArgs) -> Result<()> {
             println!(
                 "{} {}",
                 "Header length:".cyan(),
-                (MAGIC_LEN + NONCE_LEN).to_string().white()
+                format!("{}", MAGIC_LEN + NONCE_LEN).white()
             );
             match nonce_hex {
                 Some(n) => println!("{} {}", "Nonce (hex):".cyan(), n.white()),
