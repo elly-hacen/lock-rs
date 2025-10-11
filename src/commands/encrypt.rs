@@ -9,47 +9,11 @@ use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
-use zeroize::Zeroizing;
 
 use crate::options::encrypt::EncryptArgs;
 use lock::walk::{PlanEntry, build_encrypt_plan};
-use lock::{ENCRYPTED_EXT, HEADER_LEN, KEYFILE_MAGIC, MAGIC, MAGIC_LEN, NONCE_LEN};
-use lock::{key_bytes, read_lock_key};
-
-fn is_protected_keyfile(path: &Path) -> bool {
-    match fs::read(path) {
-        Ok(bytes) => bytes.starts_with(&KEYFILE_MAGIC),
-        Err(_) => false,
-    }
-}
-
-/// Load key with interactive retries:
-/// - If `passphrase_prompt` is set OR file is protected (LKEY1), prompt up to 3 times
-/// - On success, return key; on 3 failures, print and exit(1)
-fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<lock::Aes256GcmKey> {
-    if passphrase_prompt || is_protected_keyfile(key_path) {
-        for attempt in 1..=3 {
-            let msg = if attempt == 1 {
-                "Keyfile passphrase: "
-            } else {
-                "Incorrect password. Try again: "
-            };
-            let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
-            match read_lock_key(key_path, Some(pass.as_str())) {
-                Ok(k) => return Ok(k),
-                Err(_) if attempt < 3 => {}
-                Err(_) => {
-                    eprintln!("Incorrect password (3 attempts). Exiting.");
-                    std::process::exit(1);
-                }
-            }
-        }
-        unreachable!();
-    } else {
-        // Plaintext hex key path
-        read_lock_key(key_path, None)
-    }
-}
+use lock::{ENCRYPTED_EXT, HEADER_LEN, MAGIC, MAGIC_LEN, NONCE_LEN};
+use lock::{key_bytes, load_key_with_retries};
 
 pub fn run(args: EncryptArgs) -> Result<()> {
     // Load key (handles retries/prompting/zeroization)
@@ -116,7 +80,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
                         // AAD = MAGIC || NONCE
                         let mut aad_buf = [0u8; HEADER_LEN];
                         aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
-                        aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
+                        aad_buf[MAGIC_LEN..HEADER_LEN].copy_from_slice(&nonce_bytes);
 
                         // Encrypt file
                         let ct = cipher
@@ -137,6 +101,12 @@ pub fn run(args: EncryptArgs) -> Result<()> {
 
                         write_atomic(dst, &MAGIC, &nonce_bytes, &ct)
                             .with_context(|| format!("writing {}", dst.display()))?;
+
+                        // Zeroize nonce
+                        {
+                            use zeroize::Zeroize;
+                            nonce_bytes.zeroize();
+                        }
 
                         pb.inc(1);
                         Ok(())
@@ -186,7 +156,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
 
             let mut aad_buf = [0u8; HEADER_LEN];
             aad_buf[..MAGIC_LEN].copy_from_slice(&MAGIC);
-            aad_buf[MAGIC_LEN..MAGIC_LEN + NONCE_LEN].copy_from_slice(&nonce_bytes);
+            aad_buf[MAGIC_LEN..HEADER_LEN].copy_from_slice(&nonce_bytes);
 
             let ct = cipher
                 .encrypt(
@@ -206,6 +176,12 @@ pub fn run(args: EncryptArgs) -> Result<()> {
 
             write_atomic(&dst, &MAGIC, &nonce_bytes, &ct)
                 .with_context(|| format!("writing {}", dst.display()))?;
+
+            // Zeroize nonce
+            {
+                use zeroize::Zeroize;
+                nonce_bytes.zeroize();
+            }
 
             println!(
                 "[{}/{}] ok: {} -> {}",
