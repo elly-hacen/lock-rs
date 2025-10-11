@@ -132,10 +132,14 @@ fn generate_aes_gcm_key(out: &std::path::Path, force: bool, passphrase_prompt: b
             Aes256Gcm::new_from_slice(&wrap[..]).map_err(|e| anyhow!("init cipher: {e}"))?;
         let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let mut aad = Vec::with_capacity(KEYFILE_MAGIC.len() + SALT_LEN + NONCE_LEN);
-        aad.extend_from_slice(&KEYFILE_MAGIC);
-        aad.extend_from_slice(&salt);
-        aad.extend_from_slice(&nonce_bytes);
+        // Use stack-allocated array instead of heap Vec
+        let mut aad = [0u8; KEYFILE_MAGIC.len() + SALT_LEN + NONCE_LEN];
+        let mut offset = 0;
+        aad[offset..offset + KEYFILE_MAGIC.len()].copy_from_slice(&KEYFILE_MAGIC);
+        offset += KEYFILE_MAGIC.len();
+        aad[offset..offset + SALT_LEN].copy_from_slice(&salt);
+        offset += SALT_LEN;
+        aad[offset..offset + NONCE_LEN].copy_from_slice(&nonce_bytes);
 
         let ct = cipher
             .encrypt(
