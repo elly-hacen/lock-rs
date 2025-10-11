@@ -24,32 +24,12 @@ pub fn is_image(path: &Path) -> bool {
         None => return false,
     };
 
-    let eq = |want: &str| ext.eq_ignore_ascii_case(want);
+    // Use a HashSet for O(1) lookup instead of multiple string comparisons
+    const IMAGE_EXTENSIONS: &[&str] = &[
+        "jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "webp", "avif",
+        "heic", "heif", "heics", "heifs",  // iPhone / HEIF
+        "dng", "cr2", "cr3", "nef", "arw", "raf", "rw2", "orf", "sr2", "pef", "raw"  // RAW formats
+    ];
 
-    eq("jpg")
-        || eq("jpeg")
-        || eq("png")
-        || eq("gif")
-        || eq("bmp")
-        || eq("tif")
-        || eq("tiff")
-        || eq("webp")
-        || eq("avif")
-        // iPhone / HEIF
-        || eq("heic")
-        || eq("heif")
-        || eq("heics")
-        || eq("heifs")
-        // RAW formats
-        || eq("dng")
-        || eq("cr2")
-        || eq("cr3")
-        || eq("nef")
-        || eq("arw")
-        || eq("raf")
-        || eq("rw2")
-        || eq("orf")
-        || eq("sr2")
-        || eq("pef")
-        || eq("raw")
+    IMAGE_EXTENSIONS.iter().any(|&ext_name| ext.eq_ignore_ascii_case(ext_name))
 }
