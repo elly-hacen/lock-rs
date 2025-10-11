@@ -11,7 +11,7 @@ pub fn is_hidden(path: &Path) -> bool {
             }
             #[cfg(not(unix))]
             {
-                name.to_string_lossy().start_with(".")
+                name.to_string_lossy().starts_with(".")
             }
         }
         None => false,
