@@ -4,10 +4,10 @@ use base64::Engine;
 use colored::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::StatusCode;
-use std::path::{Path, PathBuf};
 use std::fs;
-use std::time::Instant;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use walkdir::WalkDir;
 
 #[derive(Debug)]
@@ -16,7 +16,6 @@ struct UploadFile {
     remote_path: String,
     size: u64,
 }
-
 
 fn fmt_gh_err(e: &octocrab::Error) -> String {
     match e {
@@ -85,7 +84,8 @@ fn collect_encrypted_files(input_dir: &Path, verbose: bool) -> Result<Vec<Upload
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_type().is_file())
             .filter(|entry| {
-                entry.path()
+                entry
+                    .path()
                     .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| e.eq_ignore_ascii_case("lock"))
@@ -99,7 +99,8 @@ fn collect_encrypted_files(input_dir: &Path, verbose: bool) -> Result<Vec<Upload
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.file_type().is_file())
             .filter(|entry| {
-                entry.path()
+                entry
+                    .path()
                     .extension()
                     .and_then(|e| e.to_str())
                     .map(|e| e.eq_ignore_ascii_case("lock"))
@@ -111,7 +112,10 @@ fn collect_encrypted_files(input_dir: &Path, verbose: bool) -> Result<Vec<Upload
     // Pre-allocate with actual file count + small buffer for safety
     let capacity = file_count.max(lock::DEFAULT_VEC_CAPACITY); // At least default capacity
     if verbose && file_count > lock::LARGE_VEC_THRESHOLD {
-        println!("Found {} files, pre-allocating memory for optimal performance", file_count);
+        println!(
+            "Found {} files, pre-allocating memory for optimal performance",
+            file_count
+        );
     }
     let mut files = Vec::with_capacity(capacity);
 
@@ -236,7 +240,7 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
     let total_files = files.len();
     let total_bytes: u64 = files.iter().map(|f| f.size).sum();
     let start_time = Instant::now();
-    
+
     let mut uploaded = 0usize;
     let mut failed = 0usize;
     let mut uploaded_bytes = 0u64;
@@ -295,11 +299,11 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
 
         // Shared state for continuous progress
         let progress_state = Arc::new(Mutex::new((
-            0u64,    // current_progress
-            0u64,    // current_file_progress
-            0usize,  // current_file_index
-            0u64,    // current_file_size
-            0usize,  // uploaded_files
+            0u64,                      // current_progress
+            0u64,                      // current_file_progress
+            0usize,                    // current_file_index
+            0u64,                      // current_file_size
+            0usize,                    // uploaded_files
             std::time::Instant::now(), // file_start_time
         )));
 
@@ -311,36 +315,43 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
             loop {
                 std::thread::sleep(std::time::Duration::from_millis(50)); // Reduced frequency
                 let now = std::time::Instant::now();
-                
-                let (current_progress, _current_file_progress, current_file_index, current_file_size, uploaded_files, file_start_time) = {
+
+                let (
+                    current_progress,
+                    _current_file_progress,
+                    current_file_index,
+                    current_file_size,
+                    uploaded_files,
+                    file_start_time,
+                ) = {
                     let state = progress_state_clone.lock().unwrap();
                     (state.0, state.1, state.2, state.3, state.4, state.5)
                 };
-                
+
                 if current_file_index >= total_files {
                     break;
                 }
-                
+
                 // Calculate smooth progress for current file
                 let mut new_file_progress = 0u64;
                 if current_file_size > 0 {
                     let elapsed = now.duration_since(file_start_time).as_secs_f64();
-                    
+
                     // Simplified progress calculation for better performance
                     let progress_ratio = if elapsed < 0.1 {
-                        elapsed * 2.0  // Quick start
+                        elapsed * 2.0 // Quick start
                     } else if elapsed < 0.5 {
-                        0.2 + (elapsed - 0.1) * 1.5  // Fast middle
+                        0.2 + (elapsed - 0.1) * 1.5 // Fast middle
                     } else {
-                        0.8 + (elapsed - 0.5) * 0.4  // Quick finish
+                        0.8 + (elapsed - 0.5) * 0.4 // Quick finish
                     };
-                    
+
                     new_file_progress = (current_file_size as f64 * progress_ratio.min(1.0)) as u64;
                 }
-                
+
                 let total_progress = current_progress + new_file_progress;
                 let remaining_files = total_files - uploaded_files;
-                
+
                 pb_clone.set_position(total_progress);
                 pb_clone.set_message(format!("{}/{}", uploaded_files, remaining_files));
             }
@@ -395,7 +406,7 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
 
     let elapsed = start_time.elapsed();
     let uploaded_mb = uploaded_bytes as f64 / (1024.0 * 1024.0);
-    
+
     println!(
         "{} {} uploaded, {} failed ({:.2} MiB in {:.2}s)",
         "Completed:".green().bold(),
@@ -421,9 +432,9 @@ async fn upload_file_contents_api(
     remote_path: &str,
 ) -> Result<()> {
     // Read and base64-encode (Contents API requires base64).
-    let content = fs::read(local_path)
-        .with_context(|| format!("reading {}", local_path.display()))?;
-    
+    let content =
+        fs::read(local_path).with_context(|| format!("reading {}", local_path.display()))?;
+
     let content_base64 = base64::engine::general_purpose::STANDARD.encode(&content);
 
     let existing = gh

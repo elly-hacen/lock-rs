@@ -3,8 +3,8 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::utils::{is_hidden, is_image};
 use crate::DEFAULT_VEC_CAPACITY;
+use crate::utils::{is_hidden, is_image};
 
 #[derive(Debug, Clone)]
 pub struct PlanEntry {
@@ -150,7 +150,8 @@ pub fn build_decrypt_plan(
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| should_descend(entry, include_hidden))
         .filter(|entry| {
-            entry.path()
+            entry
+                .path()
                 .extension()
                 .and_then(|e| e.to_str())
                 .map(|e| e.eq_ignore_ascii_case(enc_ext.trim_start_matches('.')))

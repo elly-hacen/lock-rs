@@ -25,10 +25,13 @@ pub fn is_image(path: &Path) -> bool {
     };
 
     const IMAGE_EXTENSIONS: &[&str] = &[
-        "jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "webp", "avif",
-        "heic", "heif", "heics", "heifs",  // iPhone / HEIF
-        "dng", "cr2", "cr3", "nef", "arw", "raf", "rw2", "orf", "sr2", "pef", "raw"  // RAW formats
+        "jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "webp", "avif", "heic", "heif", "heics",
+        "heifs", // iPhone / HEIF
+        "dng", "cr2", "cr3", "nef", "arw", "raf", "rw2", "orf", "sr2", "pef",
+        "raw", // RAW formats
     ];
 
-    IMAGE_EXTENSIONS.iter().any(|&ext_name| ext.eq_ignore_ascii_case(ext_name))
+    IMAGE_EXTENSIONS
+        .iter()
+        .any(|&ext_name| ext.eq_ignore_ascii_case(ext_name))
 }
