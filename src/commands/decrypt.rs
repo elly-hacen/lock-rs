@@ -8,43 +8,11 @@ use rayon::ThreadPoolBuilder;
 use rayon::prelude::*;
 use std::{fs, path::Path};
 use tempfile::NamedTempFile;
-use zeroize::Zeroizing;
 
 use crate::options::decrypt::DecryptArgs;
 use lock::walk::{PlanEntry, build_decrypt_plan};
-use lock::{ENCRYPTED_EXT, HEADER_LEN, KEYFILE_MAGIC, MAGIC, MAGIC_LEN, NONCE_LEN, TAG_LEN};
-use lock::{key_bytes, read_lock_key};
-
-fn is_protected_keyfile(path: &Path) -> bool {
-    match fs::read(path) {
-        Ok(bytes) => bytes.starts_with(&KEYFILE_MAGIC),
-        Err(_) => false,
-    }
-}
-
-fn load_key_with_retries(key_path: &Path, passphrase_prompt: bool) -> Result<lock::Aes256GcmKey> {
-    if passphrase_prompt || is_protected_keyfile(key_path) {
-        for attempt in 1..=3 {
-            let msg = if attempt == 1 {
-                "Keyfile passphrase: "
-            } else {
-                "Incorrect password. Try again: "
-            };
-            let pass = Zeroizing::new(rpassword::prompt_password(msg)?);
-            match read_lock_key(key_path, Some(pass.as_str())) {
-                Ok(k) => return Ok(k),
-                Err(_) if attempt < 3 => {}
-                Err(_) => {
-                    eprintln!("Incorrect password (3 attempts). Exiting.");
-                    std::process::exit(1);
-                }
-            }
-        }
-        unreachable!();
-    } else {
-        read_lock_key(key_path, None)
-    }
-}
+use lock::{ENCRYPTED_EXT, HEADER_LEN, MAGIC, MAGIC_LEN, NONCE_LEN, TAG_LEN};
+use lock::{key_bytes, load_key_with_retries};
 
 pub fn run(args: DecryptArgs) -> Result<()> {
     // 1) Load key (handles retries/prompting/zeroization)
@@ -110,7 +78,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
                         // AAD = MAGIC || NONCE
                         let mut aad = [0u8; HEADER_LEN];
                         aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
-                        aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
+                        aad[MAGIC_LEN..HEADER_LEN].copy_from_slice(nonce_bytes);
 
                         // Decrypt
                         let nonce = Nonce::from_slice(nonce_bytes);
@@ -176,7 +144,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
 
             let mut aad = [0u8; HEADER_LEN];
             aad[..MAGIC_LEN].copy_from_slice(&MAGIC);
-            aad[MAGIC_LEN..].copy_from_slice(nonce_bytes);
+            aad[MAGIC_LEN..HEADER_LEN].copy_from_slice(nonce_bytes);
 
             let nonce = Nonce::from_slice(nonce_bytes);
             let mut pt = cipher
