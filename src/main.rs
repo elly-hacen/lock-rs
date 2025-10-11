@@ -12,5 +12,6 @@ fn main() -> anyhow::Result<()> {
         Commands::Encrypt(args) => commands::encrypt::run(args),
         Commands::Decrypt(args) => commands::decrypt::run(args),
         Commands::Inspect(args) => commands::inspect::run(args),
+        Commands::Upload(args) => commands::upload::run(args),
     }
 }
