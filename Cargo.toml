@@ -2,7 +2,7 @@
 name = "lock"
 version = "0.1.0"
 edition = "2024"
-description = "Yet another paranoid lock - zerodize your personal pixels before they hit the cloud."
+description = "Yet another paranoid lock - zeroidize your personal pixels before they hit the cloud."
 
 # Optimize for smaller binary size and faster compilation
 [profile.dev]
