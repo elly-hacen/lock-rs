@@ -41,7 +41,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
             ProgressStyle::with_template("[{elapsed_precise}] {bar:40} {pos}/{len}").unwrap(),
         );
 
-        let threads = args.jobs.unwrap_or_else(|| rayon::current_num_threads());
+        let threads = args.jobs.unwrap_or_else(rayon::current_num_threads);
         let pool = ThreadPoolBuilder::new()
             .num_threads(threads)
             .build()
@@ -63,7 +63,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
                         }
 
                         let data =
-                            fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                            fs::read(src).with_context(|| format!("reading {}", src.display()))?;
                         if data.len() < HEADER_LEN + TAG_LEN {
                             bail!("{}: file too short to be a valid .lock", src.display());
                         }
@@ -87,7 +87,7 @@ pub fn run(args: DecryptArgs) -> Result<()> {
                             .map_err(|_| anyhow!("authentication failed: {}", src.display()))?;
 
                         // Atomic write
-                        write_atomic_plain(&dst, &pt)
+                        write_atomic_plain(dst, &pt)
                             .with_context(|| format!("writing {}", dst.display()))?;
 
                         // Zeroize plaintext from memory after writing

@@ -109,18 +109,16 @@ pub fn run(args: InspectArgs) -> Result<()> {
         }
     }
     // ----------- Unknown format -----------
-    else {
-        if args.json {
-            let j = json!({
-                "file": path.display().to_string(),
-                "type": "unknown",
-                "message": "Unrecognized file format"
-            });
-            println!("{}", serde_json::to_string_pretty(&j)?);
-        } else {
-            println!("{}", "Unrecognized file format".red().bold());
-            println!("{} {}", "File:".cyan(), path.display());
-        }
+    else if args.json {
+        let j = json!({
+            "file": path.display().to_string(),
+            "type": "unknown",
+            "message": "Unrecognized file format"
+        });
+        println!("{}", serde_json::to_string_pretty(&j)?);
+    } else {
+        println!("{}", "Unrecognized file format".red().bold());
+        println!("{} {}", "File:".cyan(), path.display());
     }
 
     Ok(())
