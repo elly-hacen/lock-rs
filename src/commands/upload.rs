@@ -199,14 +199,13 @@ async fn upload_to_github(files: Vec<UploadFile>, args: &UploadArgs) -> Result<(
     })?;
 
     // owner type must be "User" (not "Organization")
-    if let Some(own) = &repo_meta.owner {
-        if own.r#type != "User" {
-            bail!(
-                "upload blocked: {}/{} belongs to an organization. Only personal user repos are allowed.",
-                owner,
-                repo
-            );
-        }
+    if let Some(own) = &repo_meta.owner
+        && own.r#type != "User" {
+        bail!(
+            "upload blocked: {}/{} belongs to an organization. Only personal user repos are allowed.",
+            owner,
+            repo
+        );
     }
 
     // // repo must be private
@@ -499,8 +498,6 @@ async fn upload_file_contents_api(
 }
 
 fn parse_owner_repo(s: &str) -> Option<(String, String)> {
-    let mut it = s.splitn(2, '/');
-    let owner = it.next()?;
-    let repo = it.next()?;
+    let (owner, repo) = s.split_once('/')?;
     Some((owner.to_string(), repo.to_string()))
 }

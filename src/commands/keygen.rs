@@ -62,14 +62,14 @@ fn open_out(out: &std::path::Path, force: bool) -> Result<std::fs::File> {
         } else {
             opts.create_new(true);
         }
-        return match opts.open(out) {
+        match opts.open(out) {
             Ok(f) => Ok(f),
             Err(e) if e.kind() == ErrorKind::AlreadyExists && !force => Err(anyhow!(
                 "'{}' already exists. Use -f/--force to overwrite.",
                 out.display()
             )),
             Err(e) => Err(e).with_context(|| format!("creating {}", out.display())),
-        };
+        }
     }
     #[cfg(not(unix))]
     {
@@ -80,14 +80,14 @@ fn open_out(out: &std::path::Path, force: bool) -> Result<std::fs::File> {
         } else {
             opts.create_new(true);
         }
-        return match opts.open(out) {
+        match opts.open(out) {
             Ok(f) => Ok(f),
             Err(e) if e.kind() == ErrorKind::AlreadyExists && !force => Err(anyhow!(
                 "'{}' already exists. Use -f/--force to overwrite.",
                 out.display()
             )),
             Err(e) => Err(e).with_context(|| format!("creating {}", out.display())),
-        };
+        }
     }
 }
 

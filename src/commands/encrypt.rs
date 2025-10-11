@@ -34,7 +34,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
     let overwrite = args.overwrite;
 
     // --jobs by rayon pool
-    let threads = args.jobs.unwrap_or_else(|| rayon::current_num_threads());
+    let threads = args.jobs.unwrap_or_else(rayon::current_num_threads);
     let pool = ThreadPoolBuilder::new()
         .num_threads(threads)
         .build()
@@ -59,7 +59,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
                         }
                         if dst.exists() {
                             if overwrite {
-                                let _ = fs::remove_file(&dst);
+                                let _ = fs::remove_file(dst);
                             } else {
                                 pb.inc(1);
                                 return Ok(());
@@ -68,7 +68,7 @@ pub fn run(args: EncryptArgs) -> Result<()> {
 
                         // Read plaintext file
                         let mut pt =
-                            fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                            fs::read(src).with_context(|| format!("reading {}", src.display()))?;
 
                         // Per-file random nonce
                         let mut nonce_bytes = [0u8; NONCE_LEN];
