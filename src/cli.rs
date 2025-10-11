@@ -6,7 +6,7 @@ use crate::options;
 #[command(
     name = "lock",
     version,
-    about = "Yet another paranoid lock - zerodize your personal pixels before they hit the cloud."
+    about = "Yet another paranoid lock - zeroidize your personal pixels before they hit the cloud."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -30,4 +30,8 @@ pub enum Commands {
     /// File to inspect (.lock or .key)
     #[command(visible_alias = "insp")]
     Inspect(options::inspect::InspectArgs),
+
+    /// Upload encrypted files to cloud storage
+    #[command(visible_alias = "up")]
+    Upload(options::upload::UploadArgs),
 }
