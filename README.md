@@ -6,6 +6,51 @@ Yet another paranoid lock - zeroidize your personal pixels before they hit the c
 
 It just encrypts images only using AES-256-GCM before uploading to cloud storage providers.
 
+## Installation
+
+### Quick Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/elly-hacen/lock-rs/main/install.sh | bash
+```
+
+### Manual Install
+
+```bash
+# Download and run installer
+curl -sSL https://raw.githubusercontent.com/elly-hacen/lock-rs/main/install.sh -o install.sh
+chmod +x install.sh
+./install.sh
+
+# Or install to custom directory
+./install.sh --install-dir ~/.local/bin
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/elly-hacen/lock-rs.git
+cd lock-rs
+cargo build --release
+sudo cp target/release/lock /usr/local/bin/
+```
+
+### Development
+
+```bash
+# Run tests
+cargo test
+
+# Check formatting
+cargo fmt --all -- --check
+
+# Run clippy
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Create release
+./release.sh v0.1.0
+```
+
 ## Usage
 
 ### Generate Encryption Key
