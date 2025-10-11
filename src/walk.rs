@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::utils::{is_hidden, is_image};
+use crate::DEFAULT_VEC_CAPACITY;
 
 #[derive(Debug, Clone)]
 pub struct PlanEntry {
@@ -56,7 +57,19 @@ pub fn build_encrypt_plan(
     let out_root = std::fs::canonicalize(output_root)
         .with_context(|| format!("canonicalizing {}", output_root.display()))?;
 
-    let mut plan = Vec::new();
+    // First pass: count files to estimate capacity
+    let file_count = WalkDir::new(&in_root)
+        .follow_links(false)
+        .same_file_system(true)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| should_descend(entry, include_hidden))
+        .count();
+
+    // Pre-allocate with actual file count + small buffer
+    let capacity = file_count.max(DEFAULT_VEC_CAPACITY);
+    let mut plan = Vec::with_capacity(capacity);
 
     for entry in WalkDir::new(&in_root)
         .follow_links(false)
@@ -128,7 +141,26 @@ pub fn build_decrypt_plan(
     let out_root = std::fs::canonicalize(output_root)
         .with_context(|| format!("canonicalizing {}", output_root.display()))?;
 
-    let mut plan = Vec::new();
+    // First pass: count files to estimate capacity
+    let file_count = WalkDir::new(&in_root)
+        .follow_links(false)
+        .same_file_system(true)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| should_descend(entry, include_hidden))
+        .filter(|entry| {
+            entry.path()
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case(enc_ext.trim_start_matches('.')))
+                .unwrap_or(false)
+        })
+        .count();
+
+    // Pre-allocate with actual file count + small buffer
+    let capacity = file_count.max(DEFAULT_VEC_CAPACITY);
+    let mut plan = Vec::with_capacity(capacity);
     // Trim leading dot from extension for comparison
     let ext_no_dot = enc_ext.trim_start_matches('.');
 
