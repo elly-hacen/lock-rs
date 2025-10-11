@@ -7,7 +7,7 @@ pub fn is_hidden(path: &Path) -> bool {
         Some(name) => {
             #[cfg(unix)]
             {
-                name.as_bytes().first().map_or(false, |b| *b == b'.')
+                name.as_bytes().first().is_some_and(|b| *b == b'.')
             }
             #[cfg(not(unix))]
             {
