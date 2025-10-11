@@ -8,6 +8,11 @@ pub const NONCE_LEN: usize = 12; // 96-bit AES-GCM nonce
 pub const TAG_LEN: usize = 16; // 128-bit GCM authentication tag
 pub const HEADER_LEN: usize = MAGIC_LEN + NONCE_LEN;
 
+pub const MAX_PATH_LEN: usize = 4096; // Typical max path length
+pub const SMALL_BUFFER_SIZE: usize = 1024; // For small operations
+pub const DEFAULT_VEC_CAPACITY: usize = 100; // Default capacity for vectors
+pub const LARGE_VEC_THRESHOLD: usize = 1000; // Threshold for large vector operations
+
 /// extension for encrypted files
 pub const ENCRYPTED_EXT: &str = ".lock";
 
