@@ -18,13 +18,11 @@ BINARY_NAME="lock"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 TEMP_DIR=$(mktemp -d)
 
-# Cleanup function
 cleanup() {
     rm -rf "$TEMP_DIR"
 }
 trap cleanup EXIT
 
-# Print colored output
 print_info() {
     echo -e "${BLUE}ℹ${NC} $1"
 }
@@ -124,7 +122,6 @@ verify_installation() {
     fi
 }
 
-# Main installation function
 main() {
     print_info "Installing lock-rs..."
     
@@ -165,7 +162,6 @@ main() {
     verify_installation
 }
 
-# Handle command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --install-dir)
@@ -191,5 +187,4 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Run main function
 main

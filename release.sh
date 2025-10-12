@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Release script for lock-rs
 set -euo pipefail
 
 # Colors
@@ -26,7 +25,6 @@ print_error() {
     echo -e "${RED}✗${NC} $1"
 }
 
-# Check if version is provided
 if [ $# -eq 0 ]; then
     print_error "Usage: $0 <version>"
     print_info "Example: $0 v0.1.0"
@@ -43,7 +41,6 @@ fi
 
 print_info "Creating release $VERSION..."
 
-# Check if git is clean
 if [ -n "$(git status --porcelain)" ]; then
     print_error "Working directory is not clean. Commit or stash changes first."
     exit 1
@@ -63,7 +60,6 @@ sed -i "s/^version = \".*\"/version = \"${VERSION#v}\"/" Cargo.toml
 git add Cargo.toml
 git commit -m "chore: bump version to $VERSION"
 
-# Create and push tag
 print_info "Creating tag $VERSION..."
 git tag -a "$VERSION" -m "Release $VERSION"
 git push origin main
