@@ -1,3 +1,4 @@
+pub mod colors;
 pub mod cry;
 pub use cry::{Aes256GcmKey, key_bytes, load_key_with_retries, read_lock_key};
 

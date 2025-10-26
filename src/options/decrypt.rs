@@ -1,33 +1,38 @@
 use clap::Args;
 use std::path::PathBuf;
+use lock::colors;
 
 #[derive(Args, Debug)]
 pub struct DecryptArgs {
-    /// Input dir to scan encrypted images
-    #[arg(long, short = 'i', value_name = "DIR")]
+    // Path options
+    /// Directory containing encrypted .lock files
+    #[arg(long, short = 'i', value_name = "DIR", help_heading = colors::PATH_OPTIONS_HEADING)]
     pub input: PathBuf,
 
-    /// Output dir to write decrypted images
-    #[arg(long, short = 'o', value_name = "DIR")]
+    /// Directory for decrypted output files
+    #[arg(long, short = 'o', value_name = "DIR", help_heading = colors::PATH_OPTIONS_HEADING)]
     pub output: PathBuf,
 
-    /// Hex key file (64 hex chars = 32 bytes AES-256-GCM)
-    #[arg(long, short = 'k', value_name = "FILE")]
+    /// Encryption key file (256-bit AES key)
+    #[arg(long, short = 'k', value_name = "FILE", help_heading = colors::PATH_OPTIONS_HEADING)]
     pub key_file: PathBuf,
 
-    /// Include hidden files (dotfiles)
-    #[arg(long)]
+    // Decryption options
+    /// Include hidden files and directories
+    #[arg(long, help_heading = colors::DECRYPTION_OPTIONS_HEADING)]
     pub include_hidden: bool,
 
-    /// Prompt for passphrase if the key file is protected
-    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp")]
+    /// Prompt for passphrase if key is protected
+    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp", help_heading = colors::DECRYPTION_OPTIONS_HEADING)]
     pub passphrase_prompt: bool,
 
-    /// Max parallel workers (default: number of CPUs)
-    #[arg(long = "jobs", short = 'j', value_name = "N")]
+    // Performance options
+    /// Number of parallel workers [default: number of CPUs]
+    #[arg(long = "jobs", short = 'j', value_name = "N", help_heading = colors::PERFORMANCE_OPTIONS_HEADING)]
     pub jobs: Option<usize>,
 
-    /// Verbose output: print one line per file and disable progress bar
-    #[arg(long, short = 'v')]
+    // Output options
+    /// Show detailed progress for each file
+    #[arg(long, short = 'v', help_heading = colors::OUTPUT_OPTIONS_HEADING)]
     pub verbose: bool,
 }

@@ -1,5 +1,6 @@
 use clap::{Args, ValueEnum};
 use std::path::PathBuf;
+use lock::colors;
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum Algo {
@@ -10,19 +11,22 @@ pub enum Algo {
 
 #[derive(Args, Debug)]
 pub struct KeygenArgs {
-    /// Output file to write the key
-    #[arg(long, short, value_name = "FILE", default_value = "lock.key")]
+    // Key options
+    /// Output file for the encryption key [default: lock.key]
+    #[arg(long, short, value_name = "FILE", default_value = "lock.key", help_heading = colors::KEY_OPTIONS_HEADING)]
     pub out: PathBuf,
 
-    /// Algorithm for the key (currently: AES-256-GCM)
-    #[arg(long, short, value_enum, default_value_t = Algo::AesGcm)]
+    /// Encryption algorithm [default: aes-gcm]
+    #[arg(long, short, value_enum, default_value_t = Algo::AesGcm, help_heading = colors::KEY_OPTIONS_HEADING)]
     pub algo: Algo,
 
-    /// Overwrite output file if it exists
-    #[arg(long, short = 'f')]
-    pub force: bool,
-
-    /// Prompt for passphrase to protect the key file (Argon2id + AES-256-GCM)
-    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp")]
+    // Security options
+    /// Prompt for passphrase to protect the key
+    #[arg(long = "passphrase-prompt", short = 'p', visible_alias = "pp", help_heading = colors::SECURITY_OPTIONS_HEADING)]
     pub passphrase_prompt: bool,
+
+    // File options
+    /// Overwrite existing key file
+    #[arg(long, short = 'f', help_heading = colors::FILE_OPTIONS_HEADING)]
+    pub force: bool,
 }

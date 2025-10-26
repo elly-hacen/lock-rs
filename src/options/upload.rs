@@ -1,5 +1,6 @@
 use clap::{Args, ValueEnum};
 use std::path::PathBuf;
+use lock::colors;
 
 #[derive(ValueEnum, Clone, Debug)]
 pub enum Provider {
@@ -14,37 +15,41 @@ pub enum Provider {
 #[derive(Args, Debug)]
 pub struct UploadArgs {
     /// Cloud storage provider
-    #[arg(value_enum)]
+    #[arg(value_enum, help_heading = colors::PROVIDER_OPTIONS_HEADING)]
     pub provider: Provider,
 
-    /// Directory containing encrypted files (.lock)
-    #[arg(long, short = 'i', value_name = "DIR")]
+    // Path options
+    /// Directory containing encrypted files to upload
+    #[arg(long, short = 'i', value_name = "DIR", help_heading = colors::PATH_OPTIONS_HEADING)]
     pub input_dir: PathBuf,
 
-    /// GitHub personal access token (PAT Token).
-    /// If not provided, will fall back to env var GITHUB_TOKEN.
+    // GitHub options
+    /// GitHub personal access token [env: GITHUB_TOKEN]
     #[arg(
         long = "github-token",
         short = 't',
         env = "GITHUB_TOKEN",
-        value_name = "TOKEN"
+        value_name = "TOKEN",
+        help_heading = colors::GITHUB_OPTIONS_HEADING
     )]
     pub github_token: Option<String>,
 
-    /// GitHub repository name in OWNER/REPO form
-    #[arg(long = "github-repo", value_name = "OWNER/REPO")]
+    /// Target GitHub repository (format: owner/repo)
+    #[arg(long = "github-repo", value_name = "OWNER/REPO", help_heading = colors::GITHUB_OPTIONS_HEADING)]
     pub github_repo: Option<String>,
 
-    /// GitHub branch to upload to (default: main)
+    /// Target branch for upload [default: main]
     #[arg(
         long = "github-branch",
         short = 'b',
         value_name = "BRANCH",
-        default_value = "main"
+        default_value = "main",
+        help_heading = colors::GITHUB_OPTIONS_HEADING
     )]
     pub github_branch: String,
 
-    /// Show detailed progress for each file upload
-    #[arg(long, short = 'v')]
+    // Output options
+    /// Show detailed progress for each file
+    #[arg(long, short = 'v', help_heading = colors::OUTPUT_OPTIONS_HEADING)]
     pub verbose: bool,
 }
